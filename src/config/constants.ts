@@ -15,7 +15,7 @@ export const TAGLINE =
 export const EMAIL = "bharateesha.lvn@gmail.com";
 export const GITHUB_URL = "https://github.com/lvnb04";
 export const LINKEDIN_URL = "https://www.linkedin.com/in/lvnb";
-export const X_URL = "https://x.com/lvnb04"; // TODO: confirm handle
+export const X_URL = "https://x.com/Bharateesha3";
 
 // ── Sections ──────────────────────────────────────────────────────────────────
 // Order drives nav order AND neural-net input node order.
