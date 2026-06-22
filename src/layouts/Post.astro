@@ -16,6 +16,7 @@ interface NeighborLink {
 
 interface Props {
   title: string;
+  subtitle?: string;
   description: string;
   date: Date;
   updated?: Date;
@@ -29,6 +30,7 @@ interface Props {
 
 const {
   title,
+  subtitle,
   description,
   date,
   updated,
@@ -60,7 +62,19 @@ const epochs = Math.max(
   <div class="post-shell">
     <article class="post">
       <header class="post-head">
-        <h1 class="post-title">{title}</h1>
+        <h1 class="post-title">
+          {
+            title.endsWith(".") ? (
+              <>
+                {title.slice(0, -1)}
+                <span class="title-dot">.</span>
+              </>
+            ) : (
+              title
+            )
+          }
+        </h1>
+        {subtitle && <p class="post-subtitle">{subtitle}</p>}
         <p class="post-meta mono">
           {monthYear(date)} · {stats.tokensK} tokens · entropy: {stats.entropy}
           {updated && <span class="updated"> · updated {monthYear(updated)}</span>}
@@ -323,12 +337,31 @@ const epochs = Math.max(
     line-height: 1.1;
     letter-spacing: -0.015em;
     text-wrap: balance;
-    margin: 0 0 1.5rem;
+    margin: 0 0 0.6rem;
+    color: #ffffff;                /* highest brightness */
+  }
+  .title-dot {
+    color: inherit;                /* match the white title text */
+    display: inline-block;
+    font-size: 0.82em;             /* reduce the size of the dot slightly */
+    transform: translateY(0.04em); /* nudge the dot slightly downward */
+  }
+  .post-subtitle {
+    font-family: var(--font-reading);
+    font-size: clamp(1.05rem, 2.8vw, 1.22rem); /* reduced size for better scaling and hierarchy */
+    font-style: italic;
+    font-weight: 400;
+    line-height: 1.5;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+    margin: 0 auto 1.5rem;         /* centered with margins */
+    max-width: min(38rem, 100%);   /* wrapper size for comfortable reading span */
+    color: var(--text);            /* second highest brightness */
   }
   .post-meta {
-    color: var(--text-dim);        /* middle of the hierarchy: dimmer than title, brighter than tags */
+    color: var(--text-dim);        /* third: dimmer than subtitle, brighter than tags */
     font-size: 0.8rem;
-    margin: 0 0 1.5rem;            /* match the title→meta gap for symmetry */
+    margin: 0 0 1.5rem;            /* match the gap for symmetry */
   }
   .updated {
     color: var(--text-ghost);
@@ -348,7 +381,7 @@ const epochs = Math.max(
     letter-spacing: 0.14em;
   }
   .post-tag {
-    color: var(--text-faint);     /* least bright of the three, but still clearly legible */
+    color: var(--text-faint);     /* least bright of the four, but still clearly legible */
     white-space: nowrap;
   }
   .post-tag-sep {
