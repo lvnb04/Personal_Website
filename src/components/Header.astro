@@ -1,0 +1,349 @@
+---
+// src/components/Header.astro
+// Inner-page frame: two FLOATING corner elements over the starfield — no bar.
+//   - Name (top-left): serif home-link, byte-identical styling to index.astro's
+//     `.home-name` so identity reads the same on every page.
+//   - Nav (top-right): on desktop (≥768px) a row of mono section links with the
+//     active-underline treatment; on mobile (≤767px) it collapses into a hamburger
+//     button (☰) that opens a small panel listing the same sections (§4, mobile spec).
+// NEVER rendered on "/" (the neural net is the nav there).
+import { site } from "@config/site";
+
+// Active-link detection: normalize trailing slashes, match section root.
+const path = Astro.url.pathname.replace(/\/+$/, "") || "/";
+const isActive = (href: string) =>
+  path === href || path.startsWith(href + "/");
+---
+
+<a href="/" class="brand" aria-label={`${site.name} — home`}>{site.name}</a>
+
+<!-- Desktop nav: row of links (≥768px). Hidden on mobile via CSS. -->
+<nav class="nav" aria-label="Primary">
+  {
+    site.sections.map((s) => (
+      <a
+        href={s.href}
+        class:list={["nav-link", { active: isActive(s.href) }]}
+        aria-current={isActive(s.href) ? "page" : null}
+      >
+        {s.label}
+      </a>
+    ))
+  }
+</nav>
+
+<!-- Mobile nav: hamburger button + panel (≤767px). Hidden on desktop via CSS.
+     Open/closed state is in-memory only (no storage). -->
+<div class="nav-mobile" data-nav-mobile>
+  <button
+    type="button"
+    class="nav-burger"
+    data-nav-toggle
+    aria-label="Open navigation menu"
+    aria-expanded="false"
+    aria-controls="nav-panel"
+  >
+    <span class="burger-bars" aria-hidden="true">
+      <span></span><span></span><span></span>
+    </span>
+  </button>
+
+  <nav id="nav-panel" class="nav-panel" data-nav-panel aria-label="Primary" hidden>
+    <p class="nav-panel-head mono">navigate</p>
+    {
+      site.sections.map((s) => (
+        <a
+          href={s.href}
+          class:list={["nav-panel-link mono", { active: isActive(s.href) }]}
+          aria-current={isActive(s.href) ? "page" : null}
+        >
+          <span class="nav-panel-dot" aria-hidden="true" />
+          <span class="nav-panel-text">{s.label}</span>
+          <span class="nav-panel-arrow" aria-hidden="true">→</span>
+        </a>
+      ))
+    }
+  </nav>
+</div>
+
+<style>
+  /* ── Name: floating top-left, identical to the homepage `.home-name` ── */
+  .brand {
+    position: fixed;
+    top: var(--edge-pad);
+    left: var(--edge-pad);
+    z-index: 50;
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-size: 1.6rem;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    white-space: nowrap;
+    transition: color 0.2s ease;
+  }
+  .brand:hover {
+    /* keep it calm — a subtle dim→full, no accent shift */
+    color: var(--text-dim);
+  }
+
+  /* ── Desktop nav: floating top-right row. Same serif face + brightness as the name,
+     for symmetry between the two corners. Active link keeps the iris underline. ── */
+  .nav {
+    position: fixed;
+    top: var(--edge-pad);
+    right: var(--edge-pad);
+    z-index: 50;
+    display: flex;
+    align-items: baseline;
+    gap: 1.5rem;
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-size: 1.1rem;
+    letter-spacing: -0.01em;
+  }
+  .nav-link {
+    position: relative;
+    color: var(--text);
+    font-weight: 500;
+    transition: color 0.15s ease;
+  }
+  .nav-link:hover {
+    color: var(--accent-bright);
+  }
+  .nav-link.active {
+    color: var(--accent-bright);
+  }
+  .nav-link.active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -0.5rem;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--accent);
+    box-shadow: var(--accent-glow);
+  }
+
+  /* ── Mobile nav: hamburger + panel. Hidden on desktop. ── */
+  .nav-mobile {
+    display: none;
+  }
+
+  /* Toggle desktop row ↔ mobile hamburger at the breakpoint. */
+  @media (max-width: 767px) {
+    /* Name: same size as the HOMEPAGE name (--t-md) so identity reads identically on
+       every page. Centered in a 44px band so it lines up with the hamburger's center. */
+    .brand {
+      font-size: var(--t-md);
+      display: flex;
+      align-items: center;
+      min-height: 44px;
+    }
+    .nav {
+      display: none;
+    }
+    .nav-mobile {
+      display: block;
+      position: fixed;
+      top: var(--edge-pad);
+      right: var(--edge-pad);
+      z-index: 50;
+    }
+  }
+
+  .nav-burger {
+    /* ≥44px tap target */
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: var(--text);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .burger-bars {
+    position: relative;
+    display: block;
+    width: 22px;
+    height: 15px;
+  }
+  .burger-bars span {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    transition: transform 0.25s var(--ease), opacity 0.2s var(--ease);
+  }
+  .burger-bars span:nth-child(1) {
+    top: 0;
+  }
+  .burger-bars span:nth-child(2) {
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  .burger-bars span:nth-child(3) {
+    bottom: 0;
+  }
+  /* Open state: morph ☰ → ✕ (accent), so the button doubles as the close affordance. */
+  .nav-mobile[data-open] .nav-burger {
+    color: var(--accent-bright);
+  }
+  .nav-mobile[data-open] .burger-bars span:nth-child(1) {
+    transform: translateY(6.5px) rotate(45deg);
+  }
+  .nav-mobile[data-open] .burger-bars span:nth-child(2) {
+    opacity: 0;
+  }
+  .nav-mobile[data-open] .burger-bars span:nth-child(3) {
+    transform: translateY(-6.5px) rotate(-45deg);
+  }
+
+  /* Panel: a small frosted sheet anchored under the button, top-right. */
+  .nav-panel {
+    position: absolute;
+    top: calc(100% + 0.7rem);
+    right: 0;
+    min-width: 13rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.5rem 0.5rem 0.6rem;
+    background: rgba(10, 12, 17, 0.9);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--r-md);
+    box-shadow: 0 16px 44px rgba(2, 3, 8, 0.65);
+    /* animate open: fade + slight rise, scaled from the top-right corner toward the
+       button so it reads as "unfolding" from the hamburger */
+    transform-origin: top right;
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+    transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+  }
+  .nav-panel[hidden] {
+    display: none;
+  }
+  .nav-mobile[data-open] .nav-panel {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  /* quiet section header — sets the panel apart from a generic dropdown */
+  .nav-panel-head {
+    margin: 0.15rem 0.65rem 0.4rem;
+    font-size: var(--t-2xs);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-ghost);
+  }
+  .nav-panel-link {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 44px; /* ≥44px tap target per item */
+    padding: 0 0.65rem;
+    font-size: var(--t-sm);
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    border-radius: var(--r-sm);
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  /* leading dot — invisible at rest, becomes the accent marker on the active item */
+  .nav-panel-dot {
+    width: 5px;
+    height: 5px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: transparent;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+  }
+  .nav-panel-text {
+    flex: 1;
+  }
+  /* trailing arrow — slides in on hover/active for a refined "go" cue */
+  .nav-panel-arrow {
+    opacity: 0;
+    transform: translateX(-4px);
+    color: var(--hover);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+  .nav-panel-link:hover,
+  .nav-panel-link:focus-visible {
+    background: var(--surface);
+    color: var(--text);
+    outline: none;
+  }
+  .nav-panel-link:hover .nav-panel-arrow,
+  .nav-panel-link:focus-visible .nav-panel-arrow {
+    opacity: 0.8;
+    transform: translateX(0);
+  }
+  .nav-panel-link.active {
+    color: var(--accent-bright);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .nav-panel-link.active .nav-panel-dot {
+    background: var(--accent);
+    box-shadow: var(--accent-glow);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .burger-bars span,
+    .nav-panel {
+      transition: none;
+    }
+  }
+</style>
+
+<script>
+  // Mobile nav: in-memory open/closed toggle (no storage). Esc + outside-tap close.
+  const root = document.querySelector<HTMLElement>("[data-nav-mobile]");
+  if (root) {
+    const toggle = root.querySelector<HTMLButtonElement>("[data-nav-toggle]")!;
+    const panel = root.querySelector<HTMLElement>("[data-nav-panel]")!;
+
+    const setOpen = (open: boolean) => {
+      root.toggleAttribute("data-open", open);
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.setAttribute(
+        "aria-label",
+        open ? "Close navigation menu" : "Open navigation menu",
+      );
+      if (open) {
+        // reveal then animate (panel uses [hidden] for display)
+        panel.hidden = false;
+      } else {
+        // wait for the fade-out before hiding (unless reduced motion)
+        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduced) panel.hidden = true;
+        else setTimeout(() => { if (!root.hasAttribute("data-open")) panel.hidden = true; }, 200);
+      }
+    };
+
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setOpen(!root.hasAttribute("data-open"));
+    });
+
+    // outside tap / click closes
+    document.addEventListener("click", (e) => {
+      if (root.hasAttribute("data-open") && !root.contains(e.target as Node)) setOpen(false);
+    });
+
+    // Esc closes
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && root.hasAttribute("data-open")) {
+        setOpen(false);
+        toggle.focus();
+      }
+    });
+  }
+</script>

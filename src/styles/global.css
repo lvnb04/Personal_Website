@@ -1,0 +1,286 @@
+/* src/styles/global.css — design tokens + base styles (dark-only). */
+/* Palette "Ink & Iris"; type = self-hosted IBM Plex Sans + Mono. */
+
+/* Self-hosted fonts (no external requests). Weights kept minimal on purpose. */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+/* Display face — refined optical serif, used ONLY for the hero name (the one
+   human, authored mark on an otherwise technical UI). Variable = single file. */
+@import "@fontsource-variable/fraunces";
+/* Note: @fontsource/ibm-plex-serif is installed but not imported — blog body uses sans.
+   To offer a serif reading option later, re-add the serif @imports + use --font-reading. */
+
+@import "katex/dist/katex.min.css";
+
+:root {
+  /* ════════════════════════════════════════════════════════════════════
+     Palette: "Ink & Iris" — cool blue-black ink + a periwinkle/iris signal.
+     Neutrals are tinted toward the ink (no dead greys) for cohesion.
+     Elevation ladder: void < bg < surface < surface-2.
+     ════════════════════════════════════════════════════════════════════ */
+
+  /* ── Surfaces / elevation ── */
+  --void: #020308; /* deepest layer (behind page, glows, shadows) */
+  --bg: #05070c; /* page background (near-black, faint cool tint) */
+  --surface: #141a26; /* cards, nodes, code blocks */
+  --surface-2: #1b2233; /* raised surfaces, hover fills, popovers */
+  --border: #232c3d; /* subtle borders */
+  --border-bright: #36405a; /* hover borders, edge mesh top end */
+  --edge: #1a2030; /* neural-net edge mesh (very dim, blue-tinted) */
+
+  /* ── Text (cool-tinted) ── */
+  --text: #e9edf6; /* primary text */
+  --text-dim: #bcc4d4; /* secondary */
+  --text-faint: #828da6; /* meta, captions */
+  --text-ghost: #4b5573; /* hints, timestamps, TOC lines at rest */
+
+  /* ── Accent (iris) ── */
+  --accent: #7c8cff; /* active path, winner, active TOC line, links */
+  --accent-bright: #a8b1ff; /* glow highlight / "firing" peak */
+  --accent-dark: #4a57c9; /* accent borders */
+  --accent-tint: #161b35; /* active node fill */
+  --accent-glow: 0 0 0.5rem rgba(124, 140, 255, 0.45); /* bloom for active states */
+
+  /* ── Hover (interactive affordance — distinct from the iris "active" accent) ── */
+  --hover: #5fd3c4; /* teal: hover borders / interactive highlight */
+  --hover-glow: 0 0 0.5rem rgba(95, 211, 196, 0.4);
+
+  /* ── Signal (semantic, palette-independent) ── */
+  --amber: #e3b341; /* backprop / "wrong answer" state ONLY */
+  --error: #e2566b; /* 404 number only (tuned cooler to fit ink) */
+
+  /* ── Type families ── */
+  --font-mono: "IBM Plex Mono", ui-monospace, "JetBrains Mono", monospace;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-reading: "IBM Plex Serif", Georgia, "Times New Roman", serif; /* blog prose */
+  --font-display: "Fraunces Variable", "Fraunces", Georgia, serif;       /* hero name only */
+
+  /* ── Type scale (modular, ratio ≈1.25) ──────────────────────────────────────
+     The single scale used site-wide. Never go below --t-2xs (11px). */
+  --t-2xs: 0.6875rem; /* 11px — smallest allowed (vector caps labels) */
+  --t-xs: 0.75rem;    /* 12px — meta, captions */
+  --t-sm: 0.875rem;   /* 14px — mono labels, hint */
+  --t-base: 1rem;     /* 16px — body / tagline base */
+  --t-md: 1.25rem;    /* 20px — nav items */
+  --t-lg: 1.5rem;     /* 24px — tagline (desktop) */
+  --t-xl: 2rem;       /* 32px — hero name (desktop) */
+
+  /* ── Spacing scale ───────────────────────────────────────────────────────────
+     Replace ad-hoc rem paddings/gaps with these. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  /* Safe-area inset for fixed corner elements (respects notches on mobile). */
+  --edge-pad: clamp(1.5rem, 4vw, 3.5rem);
+
+  /* ── Motion language (one curve, a few durations) ────────────────────────────
+     Everything decelerates into place. No linear, no default easing anywhere. */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);        /* entrances / transitions */
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.3, 1.2);  /* micro-interactions only */
+  --dur-fast: 150ms;
+  --dur: 250ms;
+  --dur-slow: 450ms;
+
+  /* ── Shape scale (consistent radii) ── */
+  --r-sm: 6px; /* controls, chips, code */
+  --r-md: 10px; /* cards, tiles */
+  --r-lg: 14px; /* large panels */
+
+  /* ── Layout ── */
+  --measure: 46rem; /* blog reading column max-width (~700px) */
+
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Headings mono for the techy feel (CLAUDE.md §4). */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-mono);
+  color: var(--text);
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--text);
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Visible focus ring for keyboard users. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Premium selection colour. */
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--text);
+}
+
+/* Elegant page scrollbar. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-bright) transparent;
+}
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-bright);
+  border-radius: 999px;
+  border: 3px solid var(--bg); /* inset look */
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-ghost);
+}
+
+/* Reading focus mode (toggled from a blog post) — hide chrome, keep the text.
+   The header is now two floating corner elements (.brand + .nav), not a bar. */
+.brand,
+.nav {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+html.reading-focus .brand,
+html.reading-focus .nav,
+html.reading-focus .nav-mobile {
+  opacity: 0;
+  transform: translateY(-110%);
+  pointer-events: none;
+}
+html.reading-focus .site-footer {
+  display: none;
+}
+html.reading-focus .toc,
+html.reading-focus .reader-settings {
+  opacity: 0;
+  pointer-events: none;
+}
+/* hide back-to-top in focus mode (keeps at most one moving element on scroll) */
+html.reading-focus .to-top {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
+/* Meta / mono helper. */
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* Subscribe form wrapper — sits just above the footer via the before-footer slot. */
+.subscribe-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 1rem var(--edge-pad) 0;
+}
+
+/* Page content container used by inner pages. */
+.container {
+  width: 100%;
+  max-width: 64rem;
+  margin-inline: auto;
+  padding-inline: 1.25rem;
+}
+
+/* Responsive card grid shared by projects / papers / blog.
+   Fixed-width tracks + centered content so a partial last row (or a page with
+   only 1–2 tiles) sits centered under the page title rather than flush-left.
+   On a single column (mobile) the track stretches to full width. */
+.tile-grid {
+  display: grid;
+  /* fixed-width tracks, centered as a group. Max track sized so THREE tiles +
+     two gaps fit the ~61.5rem usable container width (3×19rem + 2×1.25rem ≈
+     59.5rem) — a 3-tile page stays on one row instead of wrapping. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 19rem));
+  justify-content: center;
+  gap: 1.25rem;
+}
+/* Mobile: don't let a single-column tile span the full screen — cap it and center it
+   so the starfield breathes around the cards (lighter, less "boxy" on a phone). */
+@media (max-width: 767px) {
+  .tile-grid {
+    grid-template-columns: min(86vw, 20rem);
+    justify-content: center;
+    gap: 1.5rem;
+  }
+}
+
+/* ── Signature: latent-space dot-grid ──────────────────────────────────────
+   Whisper-quiet iris dot matrix behind hero areas. Apply `.dot-field` to a
+   positioned wrapper; content inside auto-lifts above the texture. */
+.dot-field {
+  position: relative;
+  isolation: isolate;
+}
+.dot-field::before {
+  content: "";
+  position: absolute;
+  inset: -1.5rem 0 0;
+  z-index: -1;
+  background-image: radial-gradient(rgba(124, 140, 255, 0.09) 1px, transparent 1.4px);
+  background-size: 24px 24px;
+  /* fade the field in from the top-left so it never competes with content */
+  -webkit-mask-image: radial-gradient(120% 80% at 25% 0%, #000 25%, transparent 70%);
+  mask-image: radial-gradient(120% 80% at 25% 0%, #000 25%, transparent 70%);
+  pointer-events: none;
+}
+.dot-field.dot-field--faint::before {
+  background-image: radial-gradient(rgba(124, 140, 255, 0.05) 1px, transparent 1.4px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* static texture — no animation; kept here for clarity of intent */
+}

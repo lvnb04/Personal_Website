@@ -1,0 +1,330 @@
+---
+// src/components/Tile.astro
+// Shared card used by projects / papers / blog (LinkedIn "Featured" pattern):
+// a large image (~70–80% of the card) on top, then a darker text strip with the
+// title and a per-surface extras slot below it.
+//
+// `href` is OPTIONAL (§D4): when present the whole card is one <a>; when absent
+// the card renders as a non-link <article> so per-surface extras can carry their
+// own inline links (repo/demo) without illegally nesting <a> inside <a>.
+//
+// Reuse contract:
+//   <Tile [href] title image imageAlt [external] [ratio]>
+//     ...per-surface extras (stack line / meta / authors / inline links)...
+//   </Tile>
+//
+// `image` accepts an imported ImageMetadata (optimized via <Image>) OR a string URL.
+// When omitted, a tasteful on-brand placeholder renders so grids never look broken.
+import { Image } from "astro:assets";
+
+interface Props {
+  /** when present the whole card links here; when absent the card is a non-link container */
+  href?: string;
+  title: string;
+  image?: ImageMetadata | string;
+  imageAlt?: string;
+  /** open in a new tab (used for external links, e.g. publication PDFs) */
+  external?: boolean;
+  /** aspect ratio of the image area; tune the image:title ratio per surface */
+  ratio?: string;
+  /** animated thumbnail URL (from public/); plays on hover over the poster (`image`) */
+  motion?: string;
+  /** CSS object-fit value for the thumbnail image; defaults to 'cover' */
+  imgFit?: string;
+}
+
+const {
+  href,
+  title,
+  image,
+  imageAlt = "",
+  external = false,
+  ratio = "4 / 3",
+  motion,
+  imgFit = "cover",
+} = Astro.props;
+
+const isImageMeta = typeof image === "object" && image !== null;
+const placeholderGlyph = title.trim().charAt(0).toUpperCase() || "·";
+
+// Render an <a> only when there's somewhere to go; otherwise a non-link <article>.
+const Tag = href ? "a" : "article";
+const linkAttrs = href
+  ? {
+      href,
+      target: external ? "_blank" : null,
+      rel: external ? "noopener noreferrer" : null,
+    }
+  : {};
+---
+
+<Tag class="tile" {...linkAttrs}>
+  <div class="tile-media" style={`aspect-ratio: ${ratio}; --img-fit: ${imgFit}`}>
+    {
+      image ? (
+        isImageMeta ? (
+          <Image
+            src={image as ImageMetadata}
+            alt={imageAlt}
+            widths={[400, 800]}
+            sizes="(max-width: 40rem) 90vw, 30rem"
+            loading="lazy"
+          />
+        ) : (
+          <img src={image as string} alt={imageAlt} loading="lazy" decoding="async" />
+        )
+      ) : (
+        <div class="tile-placeholder" aria-hidden="true">
+          <span>{placeholderGlyph}</span>
+        </div>
+      )
+    }
+    {
+      /* hover-to-play overlay: src is empty until intent, so the heavy animated
+         asset only downloads on hover/tap (set by the script below). */
+      motion && (
+        <img
+          class="tile-motion"
+          data-motion={motion}
+          alt=""
+          aria-hidden="true"
+          loading="lazy"
+          decoding="async"
+        />
+      )
+    }
+  </div>
+
+  <div class="tile-body">
+    <h3 class="tile-title">{title}</h3>
+    <div class="tile-extras">
+      <slot />
+    </div>
+  </div>
+</Tag>
+
+<script>
+  // Hover-to-play for tiles with an animated overlay. Lazy: the motion asset's
+  // src is only set on first hover/tap, so it never downloads on page load.
+  // prefers-reduced-motion → leave it inert (CSS keeps it hidden anyway).
+  const reduce =
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  document.querySelectorAll<HTMLElement>(".tile-media").forEach((media) => {
+    const motion = media.querySelector<HTMLImageElement>(".tile-motion");
+    if (!motion || reduce) return;
+
+    const src = motion.dataset.motion;
+    let loaded = false;
+    const ensureLoaded = () => {
+      if (!loaded && src) {
+        motion.src = src;
+        loaded = true;
+      }
+    };
+
+    const tile = media.closest(".tile") as HTMLElement | null;
+    const target = tile ?? media;
+
+    target.addEventListener("pointerenter", () => {
+      ensureLoaded();
+      media.classList.add("is-playing");
+    });
+    target.addEventListener("pointerleave", () => {
+      media.classList.remove("is-playing");
+    });
+  });
+</script>
+
+<style>
+  /* ── One continuous surface, defined by LIGHT not an outline ──────────────
+     - single --surface (no internal seam between image and text)
+     - depth from a soft drop shadow + a faint top inner-highlight (light from
+       above), with a hairline border only so edges don't vanish on the darkest
+       starfield patches
+     - generous radius reads as "considered", not utilitarian */
+  .tile {
+    display: flex;
+    flex-direction: column;
+    /* card sits on page-black; a hairline border (not a lighter fill) defines it.
+       image region + text strip share one continuous --bg — no internal seam. */
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    overflow: hidden;
+    color: inherit;
+    text-decoration: none;
+    /* soft drop shadow only — lifts the card off the starfield; no inset highlight
+       (that was for the old lighter surface). */
+    box-shadow: 0 10px 30px rgba(2, 3, 8, 0.5);
+    transition:
+      box-shadow 0.3s var(--ease),
+      transform 0.3s var(--ease),
+      border-color 0.3s var(--ease);
+  }
+  .tile:hover {
+    /* premium hover = small lift + a THICKER iris outer border. The 1px border
+       turns iris and a 1.5px iris ring is layered just outside it via box-shadow
+       (no border-width change → no layout shift), reading as a ~2.5px edge. */
+    transform: translateY(-4px);
+    border-color: var(--accent);
+    box-shadow:
+      0 0 0 1.5px var(--accent),
+      0 18px 44px rgba(2, 3, 8, 0.65);
+  }
+  /* the image gently scales INSIDE the frame on hover — "the artifact is alive" */
+  .tile:hover .tile-media :global(img),
+  .tile:hover .tile-placeholder {
+    transform: scale(1.04);
+  }
+  /* only link-cards get the pointer cursor; non-link cards stay default */
+  a.tile {
+    cursor: pointer;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tile,
+    .tile-media :global(img),
+    .tile-placeholder {
+      transition: box-shadow 0.3s var(--ease), border-color 0.3s var(--ease);
+    }
+    .tile:hover {
+      transform: none;
+    }
+    .tile:hover .tile-media :global(img),
+    .tile:hover .tile-placeholder {
+      transform: none;
+    }
+  }
+
+  .tile-media {
+    position: relative;
+    width: 100%;
+    background: var(--bg);
+    overflow: hidden;
+    /* flush to card edges — let the image breathe and dominate */
+    margin: 0;
+    border-radius: 0;
+    border: none;
+  }
+  .tile-media :global(img:not(.tile-motion)) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: var(--img-fit, cover);
+    display: block;
+    transition: transform 0.4s var(--ease);
+  }
+
+  /* animated overlay sits exactly over the poster; invisible until it has both a
+     loaded src AND the .is-playing flag, then crossfades in over the still. */
+  .tile-motion {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.3s var(--ease);
+    pointer-events: none;
+  }
+  .tile-media.is-playing .tile-motion {
+    opacity: 1;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    /* never reveal motion — poster only */
+    .tile-media.is-playing .tile-motion {
+      opacity: 0;
+    }
+  }
+
+  /* placeholder = quiet texture (a faint wash + monogram), NOT a loud fallback.
+     Real screenshots will replace these; until then it must read as "intentional
+     empty", not "missing image". */
+  .tile-placeholder {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, var(--accent-tint) 70%, transparent), transparent 70%),
+      var(--surface-2);
+    transition: transform 0.4s var(--ease);
+  }
+  .tile-placeholder span {
+    font-family: var(--font-display);
+    font-size: 2.75rem;
+    font-weight: 500;
+    color: var(--text-ghost);
+    opacity: 0.6;
+  }
+
+  /* text panel — an elevated, gently SCULPTED black surface. A top-down gradient
+     (a lifted near-black at the top, settling into pure page-black at the bottom)
+     makes the panel read as a real surface curving under light, not a flat slab —
+     all in black, not grey. No divider line: the image flows into the panel via
+     the gradient alone, so only the outer card border frames the tile.
+     No image cost — the image keeps its full size above. */
+  .tile-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.8rem 0.95rem 0.85rem;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--surface) 60%, var(--bg)),
+      var(--bg)
+    );
+    min-width: 0;
+    overflow: hidden;
+  }
+  /* serif title — the focal text element on the card */
+  .tile-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    font-size: 1.2rem;
+    line-height: 1.3;
+    color: var(--text);
+    /* 2-line clamp */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .tile-extras {
+    font-family: var(--font-mono);
+    font-size: var(--t-xs);
+    color: var(--text-faint);
+    line-height: 1.5;
+  }
+  /* collapse the extras wrapper when a surface passes no slot content */
+  .tile-extras:empty {
+    display: none;
+  }
+
+  /* ── Mobile (≤767px) ───────────────────────────────────────────────────────
+     - media stays landscape & dominant; tighter frame inset so the image area
+       still reads big on a narrow card
+     - no hover on touch → GIF never auto-plays; the poster carries the card
+       (tap navigates). Slightly larger body padding for comfortable tap area. */
+  @media (max-width: 767px) {
+    .tile {
+      border-radius: 16px;
+    }
+    .tile-media {
+      margin: 0;
+      border-radius: 0;
+    }
+    .tile-body {
+      padding: 0.65rem 0.8rem 0.7rem;
+    }
+    .tile-title {
+      font-size: 1.1rem;
+    }
+  }
+</style>

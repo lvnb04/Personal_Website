@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
+  <rect width="1200" height="630" fill="#05070c"/>
+  <!-- faint dot grid -->
+  <defs>
+    <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#7c8cff" opacity="0.06"/>
+    </pattern>
+    <linearGradient id="rail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7c8cff"/>
+      <stop offset="1" stop-color="#5fd3c4"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#dots)"/>
+
+  <!-- cascade rail -->
+  <line x1="150" y1="330" x2="1050" y2="330" stroke="url(#rail)" stroke-width="2" opacity="0.5"/>
+  <g>
+    <circle cx="150" cy="330" r="10" fill="#0b0e14" stroke="#7c8cff" stroke-width="2"/>
+    <circle cx="330" cy="330" r="8" fill="#0b0e14" stroke="#4a5570" stroke-width="2"/>
+    <circle cx="510" cy="330" r="8" fill="#0b0e14" stroke="#4a5570" stroke-width="2"/>
+    <circle cx="690" cy="330" r="8" fill="#0b0e14" stroke="#4a5570" stroke-width="2"/>
+    <circle cx="870" cy="330" r="8" fill="#0b0e14" stroke="#4a5570" stroke-width="2"/>
+    <circle cx="1050" cy="330" r="11" fill="#161b35" stroke="#7c8cff" stroke-width="2"/>
+  </g>
+  <g font-family="ui-monospace, monospace" font-size="20" fill="#7d8590" text-anchor="middle">
+    <text x="150" y="372">mic</text>
+    <text x="330" y="372">VAD</text>
+    <text x="510" y="372">STT</text>
+    <text x="690" y="372">LLM</text>
+    <text x="870" y="372">TTS</text>
+    <text x="1050" y="372">out</text>
+  </g>
+
+  <text x="150" y="200" font-family="ui-monospace, monospace" font-size="30" fill="#58607a" letter-spacing="2">voice ai</text>
+  <text x="150" y="260" font-family="system-ui, sans-serif" font-size="56" font-weight="600" fill="#e9edf6">Anatomy of a Real-Time</text>
+  <text x="150" y="320" font-family="system-ui, sans-serif" font-size="56" font-weight="600" fill="#e9edf6" opacity="0">Voice Agent</text>
+</svg>

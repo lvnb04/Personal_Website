@@ -1,0 +1,157 @@
+---
+// src/pages/projects.astro — curated project grid using the shared Tile.
+// Cards are non-link containers (§D4): repo/demo render as separate inline links
+// in the extras row, shown ONLY when present. Supports repo-only, demo-only,
+// both, or neither — no dead "#" links.
+import { getCollection } from "astro:content";
+import Base from "@layouts/Base.astro";
+import PageHeader from "@components/PageHeader.astro";
+import Tile from "@components/Tile.astro";
+
+const projects = (await getCollection("projects")).sort(
+  (a, b) =>
+    (a.data.order ?? 99) - (b.data.order ?? 99) ||
+    a.data.title.localeCompare(b.data.title),
+);
+---
+
+<Base title="projects" description="Selected projects.">
+  <PageHeader title="Projects" />
+
+  <div class="tile-grid">
+    {
+      projects.map((p) => (
+        <Tile
+          title={p.data.title}
+          image={p.data.thumbnail}
+          imageAlt={`${p.data.title} thumbnail`}
+          motion={p.data.motion}
+        >
+          <p class="summary">{p.data.summary}</p>
+          {p.data.stack.length > 0 && (
+            <span class="stack-inline mono">
+              [{p.data.stack.slice(0, 3).join(", ")}]
+              {p.data.stack.length > 3 && (
+                <span class="stack-more"> ·{p.data.stack.length - 3} more</span>
+              )}
+            </span>
+          )}
+          <span class="meta">
+            {p.data.status && (
+              <span class="chip" data-status={p.data.status}>
+                {p.data.status}
+              </span>
+            )}
+            <span class="links">
+              {p.data.demo && (
+                <a class="open open-demo mono" href={p.data.demo} target="_blank" rel="noopener noreferrer">
+                  demo ↗
+                </a>
+              )}
+              {p.data.repo && (
+                <a class="open open-repo mono" href={p.data.repo} target="_blank" rel="noopener noreferrer">
+                  repo ↗
+                </a>
+              )}
+            </span>
+          </span>
+        </Tile>
+      ))
+    }
+  </div>
+</Base>
+
+<style>
+  /* one-line project description — sits between title and the mono stack line.
+     Body font + dim (not faint) so it reads as prose, distinct from the mono meta. */
+  .summary {
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--text-dim);
+    /* uniform 2-line clamp → cards keep even heights regardless of copy length */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  /* inline tech stack list — capped at 3 items so it never wraps to a 2nd line */
+  .stack-inline {
+    /* block so margin-top actually applies (margin-top is ignored on inline
+       spans) and so the single-line ellipsis clamp works */
+    display: block;
+    font-size: 0.62rem;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+    /* clearer breathing room between the prose summary and the mono stack line */
+    margin-top: 0.6rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .stack-more {
+    color: var(--text-ghost);
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: auto;
+    padding-top: 0.45rem;
+  }
+  /* status = quiet metadata: a small colored dot + muted label, no border/fill.
+     Color lives only in the dot so it reads as a status indicator, not a button. */
+  .chip {
+    font-size: var(--t-2xs);
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .chip::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-faint);
+  }
+  .chip[data-status="deployed"]::before {
+    background: var(--hover);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--hover) 70%, transparent);
+  }
+  .chip[data-status="in-training"]::before {
+    background: var(--accent);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+  .chip[data-status="archived"]::before {
+    background: var(--text-ghost);
+  }
+  /* repo/demo links pushed to the right; collapses cleanly when empty */
+  .links {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 0.9rem;
+  }
+  .open {
+    font-size: var(--t-xs);
+    transition: color 0.15s ease;
+  }
+  /* demo = the live thing → teal, reads as "go here first" */
+  .open-demo {
+    color: var(--hover);
+  }
+  .open-demo:hover {
+    color: var(--accent-bright);
+    text-shadow: var(--hover-glow);
+  }
+  /* repo = secondary → accent-blue, distinct from demo's teal */
+  .open-repo {
+    color: var(--accent);
+  }
+  .open-repo:hover {
+    color: var(--accent-bright);
+  }
+</style>

@@ -1,0 +1,106 @@
+---
+// src/components/TempSlider.astro
+// About-page "temperature" control (CLAUDE.md §9). A SHORT two-stop slider: step = 1
+// means dragging snaps straight to 0.0 or 1.0 (no dead in-between values). A clearly
+// visible thermometer icon + the live 0.0/1.0 readout carry the ML flavor; the states
+// are unlabelled so visitors discover that 1.0 flips the page voice.
+// Dispatches a `temperaturechange` CustomEvent. In-memory only; resets on reload.
+interface Props {
+  label: string;
+  initial: number; // 0 or 1
+  step: number; // 1 → two-stop snap
+}
+const { label, initial, step } = Astro.props;
+const startOn = initial >= 1;
+---
+
+<div class="temp" data-temp data-state={startOn ? "on" : "off"}>
+  <span class="temp-label mono">{label}</span>
+  <input
+    class="temp-range"
+    type="range"
+    min="0"
+    max="1"
+    step={step}
+    value={initial}
+    style={`--fill:${initial * 100}%`}
+    aria-label={`${label}: drag from 0 to 1`}
+  />
+  <output class="temp-value mono">{initial.toFixed(1)}</output>
+</div>
+
+<style>
+  .temp {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    white-space: nowrap;
+  }
+  .temp-label {
+    color: var(--accent);
+    font-size: 0.98rem;
+  }
+  .temp-value {
+    color: var(--accent);
+    font-size: 0.98rem;
+    min-width: 2.6ch;
+    text-align: right;
+  }
+  .temp-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 60px;
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--accent) var(--fill, 0%),
+      var(--border-bright) var(--fill, 0%)
+    );
+    cursor: pointer;
+  }
+  .temp-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    box-shadow: var(--accent-glow);
+    cursor: pointer;
+  }
+  .temp-range::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+    border: 2px solid var(--bg);
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: var(--accent-glow);
+    cursor: pointer;
+  }
+  .temp-range:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 5px;
+  }
+</style>
+
+<script>
+  document.querySelectorAll<HTMLElement>("[data-temp]").forEach((root) => {
+    const range = root.querySelector<HTMLInputElement>(".temp-range")!;
+    const value = root.querySelector<HTMLOutputElement>(".temp-value")!;
+
+    const update = () => {
+      const t = parseFloat(range.value);
+      const on = t >= 0.5;
+      value.textContent = t.toFixed(1);
+      range.style.setProperty("--fill", `${t * 100}%`);
+      root.dataset.state = on ? "on" : "off";
+      document.dispatchEvent(
+        new CustomEvent("temperaturechange", { detail: { t, playful: on } }),
+      );
+    };
+
+    range.addEventListener("input", update);
+  });
+</script>

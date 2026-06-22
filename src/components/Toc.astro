@@ -1,0 +1,381 @@
+---
+// src/components/Toc.astro — minimap table of contents (CLAUDE.md §11 + blog v2 spec).
+// Built from h2 + h3 headings, numbered (1, 2, 3.1, 3.2…). h4+ and the auto footnotes
+// heading are ignored.
+//
+// variant="rail"   → FIXED, vertically-centered spine of lines (never scrolls away),
+//                     evenly distributed; active line = accent (IO scroll-spy). Hovering
+//                     the rail expands a panel (opens left) with the numbered headings.
+//                     Shown ≥1000px; floats in the right margin so content stays centered.
+// variant="mobile" → collapsed "On this page" dropdown. Shown <1000px.
+import type { MarkdownHeading } from "astro";
+
+interface Props {
+  headings: MarkdownHeading[];
+  variant: "rail" | "mobile";
+  title?: string;
+}
+const { headings, variant, title = "Contents" } = Astro.props;
+
+// number the headings from their structure
+let main = 0;
+let sub = 0;
+const items = headings
+  .filter((h) => (h.depth === 2 || h.depth === 3) && h.slug !== "footnote-label")
+  .map((h) => {
+    if (h.depth === 2) {
+      main += 1;
+      sub = 0;
+      return { ...h, num: `${main}` };
+    }
+    sub += 1;
+    return { ...h, num: `${main}.${sub}` };
+  });
+---
+
+{
+  variant === "rail" ? (
+    <nav class="toc" data-toc aria-label="Table of contents">
+      <div class="toc-spine" aria-hidden="true">
+        {items.map((h) => (
+          <span class="toc-mark" data-slug={h.slug} data-depth={h.depth} />
+        ))}
+      </div>
+      <div class="toc-panel">
+        <a class="toc-panel-title mono" href="#" data-toc-top>{title}</a>
+        <ul class="toc-list">
+          {items.map((h) => (
+            <li>
+              <a
+                class="toc-p-item"
+                href={`#${h.slug}`}
+                data-slug={h.slug}
+                data-depth={h.depth}
+              >
+                <span class="toc-num mono">{h.num}</span>
+                <span class="toc-p-text">{h.text}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </nav>
+  ) : (
+    <details class="toc-mobile">
+      <summary>
+        <span class="toc-mobile-label">On this page</span>
+        <span class="toc-mobile-caret" aria-hidden="true">▾</span>
+      </summary>
+      <ul>
+        {items.map((h) => (
+          <li data-depth={h.depth}>
+            <a href={`#${h.slug}`}>
+              <span class="toc-num mono">{h.num}</span> {h.text}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
+<style>
+  /* ── Fixed minimap rail (desktop) ── */
+  .toc {
+    display: none;
+  }
+  @media (min-width: 1000px) {
+    .toc {
+      display: block;
+      position: fixed;
+      right: 1.1rem;
+      /* nudged below center so the rail's top edge clears the nav / epoch /
+         kebab stack in the top-right corner (long posts have a tall spine) */
+      top: calc(50% + 4rem);
+      transform: translateY(-50%);
+      z-index: 40;
+      transition: opacity 0.25s ease;
+    }
+  }
+
+  .toc-spine {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: space-between;
+    height: min(58vh, 32rem);
+  }
+  .toc-mark {
+    height: 2px;
+    border-radius: 2px;
+    background: var(--text-ghost);
+    transition: background 0.15s ease, width 0.15s ease, box-shadow 0.15s ease;
+  }
+  .toc-mark[data-depth="2"] {
+    width: 16px;
+  }
+  .toc-mark[data-depth="3"] {
+    width: 9px;
+  }
+  .toc-mark.active {
+    background: var(--accent);
+    width: 22px;
+    box-shadow: var(--accent-glow);
+  }
+
+  /* hover/focus panel — opens to the LEFT of the spine */
+  .toc-panel {
+    position: absolute;
+    /* overlap the minimap (anchored to the right edge) so moving the cursor onto the
+       panel never crosses a gap that would close it — Notion-style */
+    right: -0.4rem;
+    top: 50%;
+    transform: translateY(-50%) translateX(8px);
+    width: 17rem;
+    max-height: 52vh;
+    overflow-y: auto;
+    padding: 0.9rem 1rem;
+    background: rgba(10, 12, 17, 0.8);
+    backdrop-filter: blur(16px) saturate(130%);
+    -webkit-backdrop-filter: blur(16px) saturate(130%);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--r-md);
+    box-shadow: 0 16px 40px rgba(2, 3, 8, 0.6);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    /* instant panel scroll — no scroll-behavior:smooth so items snap without animation */
+    scroll-behavior: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-bright) transparent;
+  }
+  .toc-panel::-webkit-scrollbar {
+    width: 5px;
+  }
+  .toc-panel::-webkit-scrollbar-thumb {
+    background: var(--border-bright);
+    border-radius: 999px;
+  }
+  .toc-panel::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .toc:hover .toc-panel,
+  .toc:focus-within .toc-panel {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(-50%) translateX(0);
+  }
+  .toc-panel-title {
+    display: block;
+    color: var(--accent-bright);
+    font-weight: 600;
+    font-size: 0.82rem;
+    letter-spacing: 0.02em;
+    margin: 0 0 0.75rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .toc-panel-title:hover {
+    color: var(--hover);
+  }
+  .toc-panel ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.05rem;
+  }
+
+  .toc-p-item {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.32rem 0.45rem;
+    border-radius: var(--r-sm);
+    color: var(--text-faint);
+    font-size: 0.85rem;
+    line-height: 1.35;
+    transition: background 0.18s ease, color 0.18s ease;
+  }
+  .toc-p-item[data-depth="3"] {
+    padding-left: 1.4rem;
+  }
+  .toc-num {
+    color: var(--text-ghost);
+    font-size: 0.76rem;
+    flex-shrink: 0;
+    min-width: 1.8ch;
+    transition: color 0.18s ease;
+  }
+  .toc-p-item:hover {
+    color: var(--hover); /* teal on hover — distinct from the iris active state */
+  }
+  .toc-p-item.active {
+    background: var(--surface);
+    color: var(--accent-bright);   /* brighter than --accent so the active label reads clearly */
+  }
+  .toc-p-item.active .toc-num {
+    color: var(--accent-bright);
+  }
+
+  /* ── Mobile dropdown — a clearly tappable "On this page ▾" row (§6c). Distinct from
+     the nav hamburger (top-right corner): this is full-width, in-article, under the
+     title. ── */
+  .toc-mobile {
+    border: 1px solid var(--border-bright);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    padding: 0 0.9rem;
+    margin: 0 0 2rem;
+  }
+  .toc-mobile summary {
+    cursor: pointer;
+    list-style: none; /* hide the default disclosure triangle (we draw our own caret) */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-height: 44px; /* clear tap target */
+    font-family: var(--font-mono);
+    font-size: var(--t-sm);
+    color: var(--text-dim);
+  }
+  .toc-mobile summary::-webkit-details-marker {
+    display: none;
+  }
+  .toc-mobile-label {
+    letter-spacing: 0.03em;
+  }
+  .toc-mobile-caret {
+    color: var(--text-faint);
+    font-size: 0.9rem;
+    transition: transform 0.2s ease;
+  }
+  .toc-mobile[open] .toc-mobile-caret {
+    transform: rotate(180deg);
+  }
+  .toc-mobile[open] summary {
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toc-mobile-caret {
+      transition: none;
+    }
+  }
+  .toc-mobile ul {
+    list-style: none;
+    margin: 0;
+    padding: 0.75rem 0 0.9rem;
+    display: grid;
+    gap: 0.6rem;
+  }
+  .toc-mobile li[data-depth="3"] {
+    padding-left: 1rem;
+  }
+  .toc-mobile a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px; /* comfortable in-list tap target */
+    color: var(--text); /* bright + legible — these are the section titles, not captions */
+    font-size: 0.9rem;
+  }
+  .toc-mobile a:hover {
+    color: var(--accent);
+  }
+  .toc-mobile .toc-num {
+    color: var(--text-faint); /* number stays quieter than the title it labels */
+  }
+</style>
+
+<script>
+  // Scroll-spy for the rail (Notion-style). The active section lights the spine mark and
+  // the panel item. The panel NEVER scrolls on its own — it stays exactly where the reader
+  // left it; only the highlight moves, becoming visible when the reader scrolls the panel
+  // to it. This is what keeps the interaction smooth: no programmatic panel scrolling means
+  // nothing ever fights the reader's own wheel/trackpad.
+  const rail = document.querySelector("[data-toc]");
+  if (rail) {
+    const marks = rail.querySelectorAll<HTMLElement>(".toc-mark");
+    const panelItems = Array.from(rail.querySelectorAll<HTMLElement>(".toc-p-item"));
+    const slugs = Array.from(marks).map((m) => m.dataset.slug!);
+    const headings = slugs
+      .map((s) => document.getElementById(s))
+      .filter((el): el is HTMLElement => el !== null);
+
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let active = "";
+
+    // Move the highlight only — purely class toggles, no scrolling of any element.
+    const setActive = (slug: string) => {
+      if (slug === active) return;
+      active = slug;
+      marks.forEach((m) => m.classList.toggle("active", m.dataset.slug === slug));
+      panelItems.forEach((p) => p.classList.toggle("active", p.dataset.slug === slug));
+    };
+
+    // clicking the panel title returns to the top of the post
+    rail.querySelector<HTMLElement>("[data-toc-top]")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      history.replaceState(null, "", location.pathname);
+      window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
+    });
+
+    // Position-based active heading: last heading whose top edge is at or above
+    // 25% down the viewport — i.e. the section the reader is currently in.
+    const getActiveSlug = (): string => {
+      const threshold = window.innerHeight * 0.25;
+      let best = slugs[0];
+      for (const h of headings) {
+        if (h.getBoundingClientRect().top <= threshold) best = h.id;
+        else break;
+      }
+      return best;
+    };
+
+    // The section a click is steering toward. As the page smooth-scrolls there, the spy
+    // walks the highlight through each section it passes (one at a time). A section near
+    // the BOTTOM of the page can't scroll high enough to cross the 25% threshold, so once
+    // the scroll settles we set the highlight onto the clicked slug directly. No scrolling
+    // happens here — just the class — so it can't glitch.
+    let pendingClickSlug: string | null = null;
+    let settleTimer = 0;
+    const reconcileAfterSettle = () => {
+      window.clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(() => {
+        if (pendingClickSlug) setActive(pendingClickSlug);
+        pendingClickSlug = null;
+      }, 120); // fires ~120ms after the last scroll event = scroll has settled
+    };
+
+    let rafId = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => setActive(getActiveSlug()));
+      if (pendingClickSlug) reconcileAfterSettle();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+
+    // Click: smooth-scroll the PAGE to the section and update the hash. The spy sweeps the
+    // highlight section-by-section as the page scrolls; the panel itself stays put.
+    panelItems.forEach((item) => {
+      item.addEventListener("click", (e) => {
+        const slug = item.dataset.slug;
+        const target = slug ? document.getElementById(slug) : null;
+        if (!target || !slug) return;
+        e.preventDefault();
+        history.replaceState(null, "", `#${slug}`);
+        target.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+        if (reduced) {
+          setActive(slug); // instant page jump → no scroll to drive the spy
+        } else {
+          pendingClickSlug = slug;
+          reconcileAfterSettle();
+        }
+      });
+    });
+
+    // Initial state once layout is ready.
+    requestAnimationFrame(() => setActive(getActiveSlug()));
+  }
+</script>

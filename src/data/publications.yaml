@@ -1,0 +1,33 @@
+# src/data/publications.yaml
+# Publications list (NOT a content collection).
+# Fields: title, authors, venue, year, order, link?, pdf?, note?, thumbnail?
+
+- title: "BRIDGE-DAT: Bilingual Suicidal Distress Detection in Telugu via English Pivot Using DAT"
+  authors: "Bharateesha Lvn, Atharv Revankar, Datta Praneeth G S, Bhaskarjyoti Das"
+  venue: "MCT4SD"
+  year: 2025
+  order: 1
+  link: ""
+  pdf: "https://drive.google.com/file/d/1GWK1x-a_XhDnyKS4lr6lSrqzP9NQOLcx/view?usp=sharing"
+  note: ""
+  thumbnail: "/thumbs/bridge-rp-poster.jpeg"
+
+- title: "Graph-NIDS: Detecting Network Intrusions via HGT-based Edge Classification"
+  authors: "Bharateesha Lvn, J Vignesh, Jabez Lawrence G, Bhaskarjyoti Das"
+  venue: "ISBM"
+  year: 2025
+  order: 2
+  link: "https://link.springer.com/book/10.1007/978-3-032-13419-6"
+  pdf: "https://drive.google.com/file/d/1dDsHzwkY2AzMUwNk_E5QpSW3CBauXARN/view?usp=sharing"
+  note: ""
+  thumbnail: "/thumbs/graph-nids-rp-poster.png"
+
+- title: "Multimodal cGAN-Based Image Extrapolation for Forensic Analysis"
+  authors: "Bharateesha Lvn, Priyanka H, Dega Dheepakkh, G S Datta Praneeth, Pothula Sai Pramod"
+  venue: "IEEE Connect"
+  year: 2026
+  order: 3
+  link: ""
+  pdf: "https://drive.google.com/file/d/1TYwOEt2oSXffekxveTyLmQs2E8yjPkR8/view?usp=sharing"
+  note: ""
+  thumbnail: "/thumbs/cgan-rp-poster.jpeg"

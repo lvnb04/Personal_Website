@@ -1,0 +1,152 @@
+---
+// src/layouts/Base.astro
+// Standard chrome for inner pages: <head> (SEO/OG) + Header + <main> + Footer.
+// NOT used on "/" (home renders the neural net with no header).
+import { site } from "@config/site";
+import Header from "@components/Header.astro";
+import Footer from "@components/Footer.astro";
+import AmbientNet from "@components/AmbientNet.astro";
+import "@styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+  /** absolute or site-relative OG image path */
+  ogImage?: string;
+  /** override the full <title>; default appends site name */
+  rawTitle?: boolean;
+  /** set false on pages that shouldn't show the ambient background (blog post detail) */
+  ambientNet?: boolean;
+  /** which backdrop to render: "stars" (default, matches home) or "graph" (legacy node-graph) */
+  backdrop?: "stars" | "graph";
+}
+
+const {
+  title,
+  description = site.tagline,
+  ogImage = "/og-default.png",
+  rawTitle = false,
+  ambientNet = true,
+  backdrop = "stars",
+} = Astro.props;
+
+// Stars get a near-pitch background + vignette to match the homepage scene.
+const useStars = ambientNet && backdrop === "stars";
+
+const fullTitle = rawTitle ? title : `${title} · ${site.name}`;
+const canonical = new URL(Astro.url.pathname, site.url).href;
+const ogImageUrl = new URL(ogImage, site.url).href;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title={`${site.name} — blog`}
+      href="/rss.xml"
+    />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImageUrl} />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageUrl} />
+
+    <slot name="head" />
+  </head>
+  <body class:list={[{ "stars-bg": useStars, "no-ambient": !ambientNet }]}>
+    {ambientNet && <AmbientNet variant={backdrop === "stars" ? "stars-page" : "default"} />}
+    {useStars && <div class="page-vignette" aria-hidden="true"></div>}
+    <Header />
+    <!-- Top fade strip: content dissolves into the page bg as it scrolls under
+         the floating name/nav, instead of hard-clipping behind them (§A4). -->
+    <div class="frame-fade" aria-hidden="true"></div>
+    <main class="container page">
+      <slot />
+    </main>
+    <slot name="before-footer" />
+    <Footer />
+  </body>
+</html>
+
+<style>
+  /* Sticky footer: body fills the viewport, main grows, footer rests at bottom. */
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  .page {
+    flex: 1;
+    /* Top padding clears the floating frame (serif name 1.6rem) + edge pad, plus
+       extra breathing room so content starts comfortably below the corners.
+       Bottom: a comfortable, responsive gap so content never crowds the footer
+       on long pages (~3rem mobile → ~5rem desktop). */
+    padding-block: calc(var(--edge-pad) + 5.5rem) clamp(3rem, 5vw, 5rem);
+  }
+
+  /* Starfield backdrop pages: near-pitch background to match the homepage scene. */
+  body.stars-bg {
+    background: #020308;
+    --fade-bg: #020308;
+  }
+  /* Pages with NO ambient backdrop (the blog post reader): darken the page to the
+     deepest tone (--void) so the prose is the single highlight on the page. Same on
+     desktop and mobile (the bg was already viewport-independent). */
+  body.no-ambient {
+    background: var(--void);
+    --fade-bg: var(--void);
+  }
+  /* Content + footer sit above the starfield (z:0) and vignette.
+     The floating frame (.brand/.nav) carries its own z-index:50. */
+  body.stars-bg > .page,
+  body.stars-bg > :global(.site-footer) {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Top fade overlay strip — sits between content (z:1) and frame (z:50), echoes
+     the .page-vignette pattern. Fades the top of the scroll region into the bg. */
+  .frame-fade {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: calc(var(--edge-pad) + 2.5rem);
+    z-index: 5;
+    pointer-events: none;
+    /* --fade-bg matches the active page background (#020308 on stars pages,
+       --bg elsewhere) so the strip dissolves content into the real backdrop. */
+    background: linear-gradient(
+      to bottom,
+      var(--fade-bg, var(--bg)) 0%,
+      var(--fade-bg, var(--bg)) 40%,
+      transparent 100%
+    );
+  }
+  /* Lighter, top-anchored vignette: darkens the frame without dimming content. */
+  .page-vignette {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(130% 100% at 50% 0%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+  }
+</style>

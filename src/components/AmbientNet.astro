@@ -1,0 +1,261 @@
+---
+// src/components/AmbientNet.astro
+// Quiet canvas backdrop. Two rendering modes:
+//
+//  • variant="default" / "backdrop" — a drifting node-graph "ML constellation"
+//    (dim iris nodes linked when near). Used on INNER pages. Never interactive.
+//
+//  • variant="stars" — a small, moving parallax STARFIELD on near-pitch black.
+//    Used on the HOMEPAGE (per the apple-grade redesign). Stars have per-point
+//    depth so size, brightness AND drift speed scale together → real parallax.
+//
+// All modes: pause RAF when the tab is hidden; freeze to one static frame under
+// prefers-reduced-motion; pointer-events:none; aria-hidden.
+interface Props { variant?: "default" | "backdrop" | "stars" | "stars-page"; }
+const { variant = "default" } = Astro.props;
+---
+
+<canvas class="ambient-net" data-variant={variant} aria-hidden="true"></canvas>
+
+<style>
+  .ambient-net {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+    /* default: field strongest in the center */
+    -webkit-mask-image: radial-gradient(130% 110% at 50% 40%, #000 55%, transparent 100%);
+    mask-image: radial-gradient(130% 110% at 50% 40%, #000 55%, transparent 100%);
+  }
+  /* backdrop: visible drifting field behind the live net. Slightly softened in the
+     dead-center so the foreground net stays the focus, but bright enough at the edges
+     to read clearly as distant "space". */
+  .ambient-net[data-variant="backdrop"] {
+    opacity: 0.9;
+    -webkit-mask-image: radial-gradient(135% 120% at 50% 45%, rgba(0,0,0,0.35) 18%, #000 70%);
+    mask-image: radial-gradient(135% 120% at 50% 45%, rgba(0,0,0,0.35) 18%, #000 70%);
+  }
+  /* stars: center-clean mask — empty behind the network so the net sits in calm
+     space, stars present only in the outer frame as atmosphere. Mirrors what the
+     old node-graph backdrop did, and stops stars competing with the network. */
+  .ambient-net[data-variant="stars"] {
+    -webkit-mask-image: radial-gradient(70% 70% at 50% 48%, transparent 0%, transparent 34%, #000 78%);
+    mask-image: radial-gradient(70% 70% at 50% 48%, transparent 0%, transparent 34%, #000 78%);
+  }
+  /* stars-page: INNER pages have no foreground network, so the field fills the
+     whole page (no hollow center) for clear depth. A soft edge vignette only,
+     and a touch brighter overall via opacity. */
+  .ambient-net[data-variant="stars-page"] {
+    opacity: 1;
+    -webkit-mask-image: radial-gradient(125% 125% at 50% 40%, #000 60%, transparent 100%);
+    mask-image: radial-gradient(125% 125% at 50% 40%, #000 60%, transparent 100%);
+  }
+</style>
+
+<script>
+  const canvas = document.querySelector<HTMLCanvasElement>(".ambient-net");
+  if (canvas) {
+    const ctx = canvas.getContext("2d")!;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const variant = canvas.dataset.variant || "default";
+
+    let w = 0;
+    let h = 0;
+    let raf = 0;
+
+    // ── STARFIELD variant ──────────────────────────────────────────────────────
+    // "stars" = homepage (calm, hollow center); "stars-page" = inner pages
+    // (fuller field, brighter for depth). Both share the same renderer.
+    const isStars = variant === "stars" || variant === "stars-page";
+    // inner-page field reads brighter so the depth is felt behind content; homepage
+    // (desktop AND mobile) uses the base brightness.
+    const STAR_GAIN = variant === "stars-page" ? 1.7 : 1;
+    if (isStars) {
+      type Star = {
+        x: number; y: number; d: number;  // position, depth 0..1 (far..near)
+        r: number; baseA: number;         // radius, base alpha
+        tw: number; twSpeed: number;      // twinkle phase + speed
+        vx: number; vy: number;           // slow drift velocity (px/ms) — stars-page only
+        iris: boolean;                    // ~12% tinted iris, rest near-white
+      };
+      let stars: Star[] = [];
+      // stars-page: sparse field that slowly drifts for depth. homepage (desktop AND
+      // mobile): denser but FIXED — only twinkles, never drifts.
+      const isPage = variant === "stars-page";
+      const doDrift = isPage;
+
+      function makeStars() {
+        // fewer stars on inner pages so it never reads as "toy"; depth comes from
+        // slow parallax drift (below) rather than sheer count. Homepage: the center is
+        // masked out (net is the hero), so pack the visible outer frame denser (lower
+        // divisor = more stars) to give that ring real depth.
+        const divisor = isPage ? 12000 : 4200;
+        const count = Math.floor((w * h) / divisor);
+        stars = Array.from({ length: count }, () => {
+          const d = Math.random();                 // depth
+          // drift: very slow, direction random, speed scaled by depth so nearer
+          // stars move a touch faster → parallax. Only used on stars-page.
+          const ang = Math.random() * Math.PI * 2;
+          const speed = doDrift ? (0.0015 + d * 0.004) : 0; // px/ms
+          return {
+            x: Math.random() * w,
+            y: Math.random() * h,
+            d,
+            r: 0.4 + d * 1.0,                        // 0.4–1.4px
+            baseA: 0.12 + d * 0.32,                  // dimmer → texture, not signal
+            tw: Math.random() * Math.PI * 2,
+            twSpeed: 0.0006 + Math.random() * 0.0010, // slow twinkle
+            vx: Math.cos(ang) * speed,
+            vy: Math.sin(ang) * speed,
+            iris: Math.random() < 0.38,              // more cool-tinted → atmosphere, not white pinpricks
+          };
+        });
+      }
+
+      function resizeStars() {
+        w = canvas!.clientWidth;
+        h = canvas!.clientHeight;
+        canvas!.width = w * DPR;
+        canvas!.height = h * DPR;
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        makeStars();
+      }
+
+      function drawStars(now: number) {
+        ctx.clearRect(0, 0, w, h);
+        for (const s of stars) {
+          // gentle twinkle (±0.3 of base, sine); STAR_GAIN brightens inner pages
+          const tw = Math.sin(s.tw + now * s.twSpeed) * 0.3;
+          const a = Math.max(0, Math.min(1, (s.baseA + tw * s.baseA) * STAR_GAIN));
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+          if (s.iris) {
+            ctx.fillStyle = `rgba(150,162,235,${a.toFixed(3)})`;  // cool iris atmosphere
+          } else {
+            ctx.fillStyle = `rgba(200,212,238,${a.toFixed(3)})`;  // cool off-white (not stark)
+          }
+          ctx.fill();
+        }
+      }
+
+      let lastTs = 0;
+      function stepStars(now: number) {
+        const dt = lastTs ? Math.min(now - lastTs, 64) : 16; // clamp big gaps
+        lastTs = now;
+        // drift variants (stars-page + mobile homepage): advance each star by its slow
+        // drift, wrapping at the edges (with a small margin so they don't pop). Desktop
+        // homepage: positions untouched.
+        if (doDrift) {
+          const m = 2;
+          for (const s of stars) {
+            s.x += s.vx * dt;
+            s.y += s.vy * dt;
+            if (s.x < -m) s.x = w + m;
+            else if (s.x > w + m) s.x = -m;
+            if (s.y < -m) s.y = h + m;
+            else if (s.y > h + m) s.y = -m;
+          }
+        }
+        drawStars(now);
+        raf = requestAnimationFrame(stepStars);
+      }
+
+      resizeStars();
+      window.addEventListener("resize", resizeStars);
+
+      if (reduced) {
+        drawStars(0); // one static frame
+      } else {
+        raf = requestAnimationFrame(stepStars);
+        document.addEventListener("visibilitychange", () => {
+          if (document.hidden) {
+            cancelAnimationFrame(raf);
+          } else {
+            raf = requestAnimationFrame(stepStars);
+          }
+        });
+      }
+    } else {
+      // ── NODE-GRAPH variant (inner pages) — unchanged behaviour ───────────────
+      const LINK = 132; // px distance under which two nodes are linked
+      const isBackdrop = variant === "backdrop";
+      const LINE_A = isBackdrop ? 0.26 : 0.13;   // per-link base alpha
+      const NODE_A = isBackdrop ? 0.6 : 0.35;    // node fill alpha
+
+      let nodes: { x: number; y: number; vx: number; vy: number }[] = [];
+
+      function resize() {
+        w = canvas!.clientWidth;
+        h = canvas!.clientHeight;
+        canvas!.width = w * DPR;
+        canvas!.height = h * DPR;
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        const count = Math.max(16, Math.min(52, Math.floor((w * h) / 27000)));
+        nodes = Array.from({ length: count }, () => ({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          vx: (Math.random() - 0.5) * 0.16,
+          vy: (Math.random() - 0.5) * 0.16,
+        }));
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, w, h);
+        for (let i = 0; i < nodes.length; i++) {
+          const a = nodes[i];
+          for (let j = i + 1; j < nodes.length; j++) {
+            const b = nodes[j];
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            const d = Math.hypot(dx, dy);
+            if (d < LINK) {
+              const o = (1 - d / LINK) * LINE_A;
+              ctx.strokeStyle = `rgba(124,140,255,${o.toFixed(3)})`;
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(a.x, a.y);
+              ctx.lineTo(b.x, b.y);
+              ctx.stroke();
+            }
+          }
+        }
+        ctx.fillStyle = `rgba(124,140,255,${NODE_A})`;
+        for (const n of nodes) {
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, 1.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      function step() {
+        for (const n of nodes) {
+          n.x += n.vx;
+          n.y += n.vy;
+          if (n.x < 0 || n.x > w) n.vx *= -1;
+          if (n.y < 0 || n.y > h) n.vy *= -1;
+        }
+        draw();
+        raf = requestAnimationFrame(step);
+      }
+
+      resize();
+      window.addEventListener("resize", resize);
+
+      if (reduced) {
+        draw();
+      } else {
+        step();
+        document.addEventListener("visibilitychange", () => {
+          if (document.hidden) {
+            cancelAnimationFrame(raf);
+          } else {
+            raf = requestAnimationFrame(step);
+          }
+        });
+      }
+    }
+  }
+</script>

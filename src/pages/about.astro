@@ -1,0 +1,363 @@
+---
+// src/pages/about.astro — single left-aligned reading column, "spec-sheet" layout.
+// Temperature changes VOICE only, never facts (CLAUDE.md §9 + about-page spec):
+//   - resample on slide: intro, currently-learning line, and section LABELS
+//   - never change: skills, education data, contact (byte-identical at both temps)
+import Base from "@layouts/Base.astro";
+import TempSlider from "@components/TempSlider.astro";
+import { site } from "@config/site";
+
+// All copy comes from config (src/config/constants.ts → site.about). Edit there.
+const a = site.about;
+const temp = site.temperature;
+---
+
+<Base title="about" description={`About ${site.name}`}>
+
+  <div class="about">
+    <div class="about-head">
+      <h1 class="about-h1">{a.heading}</h1>
+      <TempSlider label={temp.label} initial={temp.default} step={temp.step} />
+    </div>
+
+    <div class="about-cols">
+      <!-- LEFT: intro + spec-sheet rows -->
+      <div class="about-main">
+        <p class="intro" data-resample data-prof={a.intro.professional} data-playful={a.intro.playful}>
+          {a.intro.professional}
+        </p>
+
+        <div class="rows">
+          <section class="row">
+            <span class="row-label mono" data-resample data-prof={a.now.label.professional} data-playful={a.now.label.playful}>{a.now.label.professional}</span>
+            <p class="row-body">{a.now.body}</p>
+          </section>
+
+          <section class="row">
+            <span class="row-label mono" data-resample data-prof={a.education.label.professional} data-playful={a.education.label.playful}>{a.education.label.professional}</span>
+            <p class="row-body">{a.education.body}</p>
+          </section>
+
+          <section class="row">
+            <span class="row-label mono" data-resample data-prof={a.skills.label.professional} data-playful={a.skills.label.playful}>{a.skills.label.professional}</span>
+            <div class="row-body skills">
+              {
+                a.skills.groups.map((s) => (
+                  <p class="skill-line">
+                    <span class="skill-group mono">{s.group}</span>
+                    <span class="skill-items">{s.items}</span>
+                  </p>
+                ))
+              }
+            </div>
+          </section>
+
+          <section class="row">
+            <span class="row-label mono" data-resample data-prof={a.learning.label.professional} data-playful={a.learning.label.playful}>{a.learning.label.professional}</span>
+            <p class="row-body" data-resample data-prof={a.learning.professional} data-playful={a.learning.playful}>{a.learning.professional}</p>
+          </section>
+
+          <section class="row">
+            <span class="row-label mono">{a.contact.label}</span>
+            <p class="row-body">
+              Reach me at <a class="link" href={`mailto:${site.email}`}>{site.email}</a>, or read my
+              <a class="link" href={a.resumeHref}> résumé</a>.
+            </p>
+          </section>
+        </div>
+      </div>
+
+      <!-- RIGHT: career timeline -->
+      <aside class="about-side">
+        <span class="side-label mono" data-resample data-prof={a.experience.label.professional} data-playful={a.experience.label.playful}>{a.experience.label.professional}</span>
+        <ol class="timeline">
+          {
+            a.experience.timeline.map((node) => (
+              <li class="tl-node" data-current={node.current ? "true" : undefined}>
+                <span class="tl-dot" aria-hidden="true" />
+                <div class="tl-content">
+                  <span class="tl-year mono">{node.period}</span>
+                  <p class="tl-title">
+                    {node.title} <span class="tl-org">· {node.org}</span>
+                  </p>
+                  <p class="tl-desc" data-resample data-prof={node.description.professional} data-playful={node.description.playful}>
+                    {node.description.professional}
+                  </p>
+                </div>
+              </li>
+            ))
+          }
+        </ol>
+      </aside>
+    </div>
+  </div>
+</Base>
+
+<style>
+  .about {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+  }
+  /* Heading + slider share one line: heading left, slider right, centered. */
+  .about-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    margin: 0 0 2.25rem;
+  }
+  /* iris serif, matching the other page titles — left-aligned here */
+  .about-h1 {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--accent);
+    font-size: clamp(1.6rem, 4vw, 2.25rem);
+    margin: 0;
+  }
+  /* mobile: let the slider drop below the heading rather than overflow */
+  @media (max-width: 36rem) {
+    .about-head {
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+  }
+
+  /* two columns on wide screens: left = content, right = timeline.
+     mobile-first: single column (stacked) by default. */
+  .about-cols {
+    display: grid;
+    gap: 2.75rem;
+  }
+  @media (min-width: 62rem) {
+    .about-cols {
+      /* left content takes the majority; timeline is a compact side rail */
+      grid-template-columns: minmax(0, 1fr) 17rem;
+      gap: 3.5rem;
+      align-items: start;
+    }
+  }
+  .about-main {
+    max-width: 42rem; /* keep prose readable when stacked */
+  }
+  @media (min-width: 62rem) {
+    .about-main {
+      max-width: none;
+    }
+  }
+
+  .intro {
+    font-size: 1.05rem;
+    line-height: 1.7;
+    color: var(--text);
+    margin: 0 0 2.75rem;
+  }
+
+  .rows {
+    display: grid;
+    gap: 2.4rem;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 7.5rem 1fr;
+    gap: 1rem;
+    align-items: baseline;
+  }
+  .row-label {
+    color: var(--accent);
+    font-size: 0.95rem;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+  }
+  .row-body {
+    margin: 0;
+    color: var(--text-dim);
+    line-height: 1.65;
+    font-size: 0.9rem;
+  }
+
+  .skills {
+    display: grid;
+    gap: 0.7rem;
+  }
+  .skill-line {
+    margin: 0;
+    display: grid;
+    grid-template-columns: 4.5rem 1fr;
+    gap: 0.75rem;
+    align-items: baseline;
+  }
+  .skill-group {
+    color: var(--text-faint);
+    font-size: 0.78rem;
+  }
+  .skill-items {
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    line-height: 1.6;
+  }
+
+  /* ── Career timeline (compact right-side rail) ── */
+  @media (min-width: 62rem) {
+    .about-side {
+      position: sticky;
+      top: 5rem; /* clears the sticky header */
+    }
+  }
+  .side-label {
+    display: block;
+    color: var(--accent);
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    margin: 0 0 1.4rem;
+  }
+  .timeline {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  /* the rail fades accent (top/newest) → border (bottom/oldest) */
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    border-radius: 2px;
+    background: linear-gradient(to bottom, var(--accent), var(--border));
+  }
+  .tl-node {
+    position: relative;
+    padding-left: 1.7rem;
+    padding-bottom: 1.7rem;
+  }
+  .tl-node:last-child {
+    padding-bottom: 0;
+  }
+  /* ring-style dots sitting on the rail (bg fill masks the line through the centre) */
+  .tl-dot {
+    position: absolute;
+    left: 0;
+    top: 4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--border-bright);
+    box-sizing: border-box;
+  }
+  .tl-node:nth-child(2) .tl-dot { opacity: 0.8; }
+  .tl-node:nth-child(3) .tl-dot { opacity: 0.65; }
+  .tl-node:nth-child(n + 4) .tl-dot { opacity: 0.55; }
+  /* current / most-recent: larger, accent ring + faint fill + glow */
+  .tl-node[data-current] .tl-dot {
+    width: 15px;
+    height: 15px;
+    left: -2px;
+    top: 3px;
+    opacity: 1;
+    background: var(--accent-tint);
+    border-color: var(--accent);
+    box-shadow: var(--accent-glow);
+  }
+  .tl-year {
+    display: block;
+    color: var(--text-ghost);
+    font-size: 0.78rem;
+  }
+  .tl-node[data-current] .tl-year {
+    color: var(--accent);
+  }
+  .tl-title {
+    margin: 0.15rem 0 0.35rem;
+    color: var(--text);
+    font-size: 0.96rem;
+    line-height: 1.35;
+  }
+  .tl-org {
+    color: var(--text-faint);
+    font-weight: 400;
+  }
+  .tl-desc {
+    margin: 0;
+    color: var(--text-faint);
+    line-height: 1.55;
+    font-size: 0.85rem;
+  }
+
+  .link {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: var(--accent-dark);
+    text-underline-offset: 3px;
+  }
+  .link:hover {
+    color: var(--hover);
+    text-decoration-color: var(--hover);
+  }
+
+  @media (max-width: 36rem) {
+    .row {
+      grid-template-columns: 1fr;
+      gap: 0.4rem;
+    }
+    .skill-line {
+      grid-template-columns: 1fr;
+      gap: 0.15rem;
+    }
+  }
+</style>
+
+<script>
+  // Page-wide "token resample": scramble each [data-resample] node into the other
+  // voice when temperature crosses 0.5. Facts (no data-resample) never change.
+  const GLYPHS = "01∂∇λμσΣ∑·+=<>{}[]/\\λ|";
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function scramble(el: HTMLElement, target: string) {
+    if (reduced) {
+      el.textContent = target;
+      return;
+    }
+    const dur = 520;
+    const len = target.length;
+    let startTs: number | null = null;
+
+    function tick(now: number) {
+      if (startTs === null) startTs = now;
+      const p = Math.min(1, (now - startTs) / dur);
+      const reveal = Math.floor(len * p);
+      let out = target.slice(0, reveal);
+      for (let i = reveal; i < len; i++) {
+        out +=
+          target[i] === " "
+            ? " "
+            : GLYPHS[(i + Math.floor(now / 30)) % GLYPHS.length];
+      }
+      el.textContent = out;
+      if (p < 1) requestAnimationFrame(tick);
+      else el.textContent = target;
+    }
+    requestAnimationFrame(tick);
+  }
+
+  const targets = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-resample]"),
+  );
+  let playful = false;
+
+  document.addEventListener("temperaturechange", (e) => {
+    const want = (e as CustomEvent).detail.playful as boolean;
+    if (want === playful) return;
+    playful = want;
+    for (const el of targets) {
+      const text = playful ? el.dataset.playful : el.dataset.prof;
+      if (text != null) scramble(el, text);
+    }
+  });
+</script>

@@ -1,0 +1,140 @@
+---
+// src/pages/papers.astro — papers as a Tile grid (per docs/decisions.md §4).
+// Cards are non-link containers (§D4): the title links out to (pdf || link) as a
+// separate inline link, shown only when a target exists. Optional `note` shown
+// only when present. Authors (your name bolded) + venue/year always render.
+// (Route renamed from /publications → /papers; internal data/lib names unchanged.)
+import Base from "@layouts/Base.astro";
+import PageHeader from "@components/PageHeader.astro";
+import Tile from "@components/Tile.astro";
+import { getPublications } from "@lib/publications";
+import { site } from "@config/site";
+
+const pubs = getPublications();
+
+// Split an authors string around the site owner's name so we can bold it.
+function authorParts(authors: string): { text: string; me: boolean }[] {
+  return authors
+    .split(site.name)
+    .flatMap((chunk, i) =>
+      i === 0
+        ? [{ text: chunk, me: false }]
+        : [{ text: site.name, me: true }, { text: chunk, me: false }],
+    )
+    .filter((p) => p.text.length > 0);
+}
+---
+
+<Base title="papers" description="Papers and write-ups.">
+  <PageHeader title="Papers" />
+
+  <div class="tile-grid">
+    {
+      pubs.map((p) => {
+        return (
+          <Tile
+            title={p.title}
+            image={p.thumbnail || undefined}
+            imageAlt={`${p.title} figure`}
+          >
+            <span class="authors">
+              {authorParts(p.authors).map((part) =>
+                part.me ? <strong>{part.text}</strong> : <span>{part.text}</span>,
+              )}
+            </span>
+            <span class="venue mono">
+              <span class="venue-name">{p.venue}</span> · <span class="venue-year">{p.year}</span>
+            </span>
+            {p.note && <span class="note">{p.note}</span>}
+            <span class="meta">
+              <span class="links">
+                {p.link && (
+                  <a class="open open-pub mono" href={p.link} target="_blank" rel="noopener noreferrer">
+                    publication ↗
+                  </a>
+                )}
+                {p.pdf && (
+                  <a class="open open-pdf mono" href={p.pdf} target="_blank" rel="noopener noreferrer">
+                    pdf ↗
+                  </a>
+                )}
+              </span>
+            </span>
+          </Tile>
+        );
+      })
+    }
+  </div>
+</Base>
+
+<style>
+  .authors {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  .authors strong {
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  .venue {
+    display: block;
+    margin-top: 0.35rem;
+    color: var(--text-faint);
+    font-size: 0.76rem;
+  }
+  /* venue name in accent — the strongest credibility signal leads the eye */
+  .venue-name {
+    color: var(--accent);
+  }
+  /* year: muted warm mauve — desaturated enough to read as a quiet grey,
+     just warm enough to be distinct from the cool text-dim; no new hue family */
+  .venue-year {
+    color: #b8a8c0;
+  }
+  .note {
+    display: block;
+    margin-top: 0.35rem;
+    color: var(--text-ghost);
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: auto;
+    padding-top: 0.45rem;
+  }
+  .links {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 0.9rem;
+  }
+  .open {
+    font-size: var(--t-xs);
+    transition: color 0.15s ease;
+  }
+  /* publication = primary → teal (same as demo) */
+  .open-pub {
+    color: var(--hover);
+  }
+  .open-pub:hover {
+    color: var(--accent-bright);
+    text-shadow: var(--hover-glow);
+  }
+  /* pdf = secondary → accent-blue (same as repo) */
+  .open-pdf {
+    color: var(--accent);
+  }
+  .open-pdf:hover {
+    color: var(--accent-bright);
+  }
+</style>
+

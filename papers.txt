@@ -1,0 +1,30 @@
+paper 1 
+
+title : BRIDGE-DAT: Bilingual Recognition and Interpretation of Suicidal Distress Expressions in Telugu via English Pivot using Domain Adversarial Training
+
+authors : Bharateesha Lvn1, Atharv Revankar1, Datta Praneeth G S1, and Bhaskarjyoti Das1
+
+conferene : MCT4SD 2025
+
+thumbnail path : "C:\Users\LvnBharateesha\Downloads\bridge rp.jpeg"
+
+paper 2 : 
+
+title : Graph-NIDS: Detecting Network Intrusions via HGT-based Edge Classification on Network Traffic Graphs
+
+authors : Bharateesha lvn1, J Vignesh2, Jabez Lawrence G3, and Bhaskarjyoti Das4
+
+conference : ISBM 2025
+
+thumbnail path : "C:\Users\LvnBharateesha\Downloads\graph_nids RP.png"
+
+paper 3 :
+
+title : Multimodal cGAN-Based Image Extrapolation for Forensic Analysis Using Partial Images and Textual Conditioning
+
+authors : L V N Bharateesha, Priyanka H, Dega Dheepakkh, G S Datta Praneeth, Pothula Sai Pramod
+
+conference : IEEE connect 2026
+
+thumbnail path : "C:\Users\LvnBharateesha\Downloads\cgan rp.jpeg"
+

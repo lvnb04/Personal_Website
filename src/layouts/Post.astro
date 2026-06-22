@@ -1,0 +1,1274 @@
+---
+// src/layouts/Post.astro — blog post reading chrome (CLAUDE.md §11).
+// Training-style progress bar, meta line, minimap TOC (rail + mobile), prev/next, and
+// reader features: image lightbox + captions, heading anchors, table scroll-wrap,
+// external-link markers. Wraps Base for header/footer/SEO/OG.
+import type { MarkdownHeading } from "astro";
+import Base from "@layouts/Base.astro";
+import Toc from "@components/Toc.astro";
+import SubscribeForm from "@components/SubscribeForm.astro";
+import { readingStats, monthYear } from "@lib/readingStats";
+
+interface NeighborLink {
+  slug: string;
+  title: string;
+}
+
+interface Props {
+  title: string;
+  description: string;
+  date: Date;
+  updated?: Date;
+  tags: string[];
+  headings: MarkdownHeading[];
+  body: string; // raw markdown, for reading stats
+  ogImage?: string;
+  prev?: NeighborLink | null;
+  next?: NeighborLink | null;
+}
+
+const {
+  title,
+  description,
+  date,
+  updated,
+  tags,
+  headings,
+  body,
+  ogImage,
+  prev,
+  next,
+} = Astro.props;
+
+const stats = readingStats(body);
+
+// "Epochs" = number of main sections; the page is split into that many equal segments,
+// and completing each segment ticks one epoch — a nod to ML training.
+const epochs = Math.max(
+  1,
+  headings.filter((h) => h.depth === 2 && h.slug !== "footnote-label").length,
+);
+---
+
+<Base title={title} description={description} ogImage={ogImage} ambientNet={false}>
+  <!-- training progress bar -->
+  <div class="progress" role="progressbar" aria-label="reading progress" aria-hidden="true" data-epochs={epochs}>
+    <div class="progress-fill" data-progress-fill></div>
+    <span class="progress-label mono" data-progress-label>epoch 1/{epochs} · 0%</span>
+  </div>
+
+  <div class="post-shell">
+    <article class="post">
+      <header class="post-head">
+        <h1 class="post-title">{title}</h1>
+        <p class="post-meta mono">
+          {monthYear(date)} · {stats.tokensK} tokens · entropy: {stats.entropy}
+          {updated && <span class="updated"> · updated {monthYear(updated)}</span>}
+        </p>
+        {
+          tags.length > 0 && (
+            <p class="post-tags mono">
+              {tags.map((t, i) => (
+                <>
+                  {i > 0 && <span class="post-tag-sep" aria-hidden="true"> · </span>}
+                  <span class="post-tag">{t}</span>
+                </>
+              ))}
+            </p>
+          )
+        }
+      </header>
+
+      <hr class="post-rule" />
+
+      <div class="toc-mobile-wrap">
+        <Toc headings={headings} variant="mobile" title={title} />
+      </div>
+
+      <div class="prose" data-prose>
+        <slot />
+      </div>
+
+      <nav class="post-nav" aria-label="More posts">
+        {
+          prev ? (
+            <a class="post-nav-link prev" href={`/blog/${prev.slug}`}>
+              <span class="nav-dir mono">← previous</span>
+              <span class="nav-title">{prev.title}</span>
+            </a>
+          ) : (
+            <span />
+          )
+        }
+        {
+          next && (
+            <a class="post-nav-link next" href={`/blog/${next.slug}`}>
+              <span class="nav-dir mono">next →</span>
+              <span class="nav-title">{next.title}</span>
+            </a>
+          )
+        }
+      </nav>
+    </article>
+  </div>
+
+  <!-- reading settings (kebab → panel), aligned near the title line -->
+  <div class="reader-settings" data-reader-settings>
+    <button
+      type="button"
+      class="rs-toggle"
+      data-rs-toggle
+      aria-label="Reading settings"
+      aria-expanded="false"
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">
+        <circle cx="5" cy="12" r="1.7" />
+        <circle cx="12" cy="12" r="1.7" />
+        <circle cx="19" cy="12" r="1.7" />
+      </svg>
+    </button>
+
+    <div class="rs-panel" data-rs-panel hidden>
+      <p class="rs-title mono">reading</p>
+      <!-- progress/epoch readout — lives INSIDE the panel on mobile (no separate floating
+           chip obstructing the text). Mono, dim. -->
+      <div class="rs-row rs-progress-row">
+        <span class="rs-label">Progress</span>
+        <span class="rs-progress mono" data-rs-progress>epoch 1/{epochs} · 0%</span>
+      </div>
+      <div class="rs-row">
+        <span class="rs-label">Text size</span>
+        <div class="rs-stepper">
+          <button type="button" class="rs-step mono" data-font-dec aria-label="Decrease text size">A−</button>
+          <button type="button" class="rs-step mono" data-font-reset aria-label="Reset text size">reset</button>
+          <button type="button" class="rs-step mono rs-inc" data-font-inc aria-label="Increase text size">A+</button>
+        </div>
+      </div>
+      <div class="rs-row">
+        <span class="rs-label">Focus mode</span>
+        <button type="button" class="rs-switch" data-focus-toggle role="switch" aria-checked="false" aria-label="Toggle focus mode">
+          <span class="rs-knob"></span>
+        </button>
+      </div>
+      <!-- back to top — folded into the panel on mobile so it isn't a 3rd floating button -->
+      <button type="button" class="rs-totop mono" data-rs-totop>↑ back to top</button>
+      <p class="rs-hint">Press <kbd>F</kbd> for focus mode · <kbd>Esc</kbd> to exit.</p>
+    </div>
+  </div>
+
+  <!-- fixed minimap rail (positions itself; desktop only) -->
+  <Toc headings={headings} variant="rail" title={title} />
+
+  <!-- focus-mode exit hint (only visible while in focus mode).
+       Desktop: "focus mode · Esc to exit" toast. Mobile: a persistent icon button
+       top-left — the YouTube-style "exit fullscreen" glyph (four corners pointing in)
+       to signal "tap to return" (no keyboard, so it must be tappable). -->
+  <button type="button" class="focus-exit" data-focus-exit aria-label="Exit focus mode">
+    <span class="fe-desktop">focus mode · <kbd>Esc</kbd> to exit</span>
+    <svg class="fe-mobile" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 4v3a2 2 0 0 1-2 2H4M20 9h-3a2 2 0 0 1-2-2V4M4 15h3a2 2 0 0 1 2 2v3M15 20v-3a2 2 0 0 1 2-2h3" />
+    </svg>
+  </button>
+
+  <!-- back to top (fades in after scrolling) -->
+  <button type="button" class="to-top" data-to-top aria-label="Back to top">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 19V5M5 12l7-7 7 7" />
+    </svg>
+  </button>
+
+  <!-- lightbox overlay (populated on image click) -->
+  <div class="lightbox" data-lightbox hidden>
+    <img class="lightbox-img" data-lightbox-img alt="" />
+  </div>
+
+  <div slot="before-footer" class="subscribe-wrap">
+    <SubscribeForm />
+  </div>
+</Base>
+
+<style>
+  /* ── progress bar ── */
+  .progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    z-index: 60;
+    background: var(--border);
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    box-shadow: var(--accent-glow);
+    transition: width 0.1s linear;
+  }
+  .progress-label {
+    /* Stack UNDER the floating nav (top-right), with clear vertical breathing
+       room from the nav row, and pulled further toward the right edge (§B). */
+    position: fixed;
+    top: calc(var(--edge-pad) + 3.4rem);
+    right: 1.25rem;
+    z-index: 55;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    background: var(--surface);
+    border: 1px solid var(--border-bright);
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--r-sm);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  /* in focus mode: hidden (slid up), slides down on scroll, back up after 2s */
+  html.reading-focus .progress-label {
+    opacity: 0;
+    transform: translateY(-180%);
+    pointer-events: none;
+  }
+  html.reading-focus .progress-label.peek {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+  @media (max-width: 767px) {
+    /* Mobile: keep ONLY the thin top progress BAR (always-on, unobtrusive). The epoch
+       READOUT moves INTO the settings panel (no floating chip obstructing the text). */
+    .progress-label {
+      display: none;
+    }
+  }
+
+  /* ── layout: content centered in the viewport; minimap floats in the right margin ── */
+  .post-shell {
+    position: relative;
+    z-index: 1;
+  }
+  .post {
+    width: 100%;
+    /* Centered reading column with even gutters on every width (§6a / §13). */
+    max-width: min(43rem, 100% - 2rem);
+    margin-inline: auto;
+  }
+  /* Guarantee the column is centered with equal gutters on mobile regardless of the
+     parent container's padding — and that the body text reads as a centered block,
+     left-aligned within it (never flush to one edge). */
+  @media (max-width: 767px) {
+    /* The reading column = full width MINUS equal gutters, centered. Everything (title,
+       headings, body, rule, nav) shares this exact box so the left AND right edges line
+       up consistently — no element hugs one side. */
+    .post {
+      max-width: 100%;
+      margin-inline: auto;
+    }
+    .prose,
+    .post-head,
+    .toc-mobile-wrap,
+    .post-nav,
+    .post-rule {
+      width: 100%;
+      max-width: 100%;
+      margin-inline: auto;
+      box-sizing: border-box;
+    }
+    .prose {
+      text-align: left;
+      min-width: 0;          /* allow flex/grid ancestors to shrink instead of overflow */
+      /* the desktop prose reserves right-margin space for floated sidenotes via
+         overflow:visible; on mobile sidenotes are inline, so clip any stray overflow to
+         keep the right edge flush with the column (no phantom right gutter). */
+      overflow-x: clip;
+    }
+    /* headings + paragraphs share the column's exact left/right edges */
+    .prose :global(h2),
+    .prose :global(h3),
+    .prose :global(p),
+    .prose :global(ul),
+    .prose :global(ol),
+    .prose :global(blockquote) {
+      margin-inline: 0;
+      max-width: 100%;
+    }
+    .prose :global(img),
+    .prose :global(pre),
+    .prose :global(table),
+    .prose :global(.expressive-code) {
+      max-width: 100%;       /* wide media never exceeds the column */
+    }
+    .prose :global(pre),
+    .prose :global(.expressive-code),
+    .prose :global(.table-scroll) {
+      overflow-x: auto;      /* long code/tables scroll inside, never widen the page */
+    }
+  }
+  @media (min-width: 1000px) {
+    .toc-mobile-wrap {
+      display: none;
+    }
+  }
+
+  /* ── calm, centered header ── */
+  .post-head {
+    text-align: center;
+    margin-bottom: 1.75rem;
+  }
+  /* Display serif (Fraunces) — matches the "Bharateesha Lvn" wordmark, tying the header
+     identity to the article title. Lives in the reading column like meta/body/rule, so
+     every element shares one clean left/right edge; wraps naturally (1–2 lines). */
+  .post-title {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-weight: 540;
+    font-size: clamp(2.0rem, 6vw, 3.2rem);
+    line-height: 1.1;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0 0 1.5rem;
+  }
+  .post-meta {
+    color: var(--text-dim);        /* middle of the hierarchy: dimmer than title, brighter than tags */
+    font-size: 0.8rem;
+    margin: 0 0 1.5rem;            /* match the title→meta gap for symmetry */
+  }
+  .updated {
+    color: var(--text-ghost);
+  }
+  /* Dim uppercase "kicker" — small, letter-spaced, middot-separated. Reads as a refined
+     editorial category line, not generic tag bubbles or links. No color, on-brand mono. */
+  .post-tags {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: baseline;
+    gap: 0 0.1rem;
+    margin: 0;                    /* gap comes from .post-meta's margin-bottom (symmetric) */
+    padding: 0;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .post-tag {
+    color: var(--text-faint);     /* least bright of the three, but still clearly legible */
+    white-space: nowrap;
+  }
+  .post-tag-sep {
+    color: var(--text-ghost);
+    /* offset the trailing letter-spacing so the middot sits visually centered */
+    margin-left: -0.14em;
+  }
+  /* thin rule separating the header from the body ("settling in") */
+  .post-rule {
+    border: none;
+    border-top: 1px solid var(--border);
+    width: 100%;
+    margin: 0 0 2.25rem;
+  }
+  .toc-mobile-wrap {
+    text-align: left;
+  }
+
+  /* ── prose: refined sans reading typography (technical blog) ── */
+  .prose {
+    font-family: var(--font-body);
+    color: var(--text-dim);
+    font-size: calc(1.125rem * var(--reading-scale, 1)); /* ~18px */
+    line-height: 1.7;
+    text-wrap: pretty; /* avoid orphans where supported */
+    counter-reset: sidenote; /* Sidenote.astro increments this */
+    /* overflow visible so floated sidenotes can escape into the right margin */
+    overflow: visible;
+  }
+  .prose :global(h2),
+  .prose :global(h3) {
+    font-family: var(--font-body);
+    color: var(--text);
+    font-weight: 600;
+    scroll-margin-top: 5rem; /* clear the sticky header on anchor jumps */
+    position: relative;
+    text-wrap: balance;
+  }
+  .prose :global(h2) {
+    font-size: 1.75rem; /* ~28px */
+    margin: 2.5em 0 0.6em; /* more space above than below — groups with its content */
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--border);
+  }
+  .prose :global(h3) {
+    font-size: 1.3125rem; /* ~21px */
+    margin: 1.8em 0 0.4em;
+  }
+  /* Mobile: ~17px body (desktop ~18px feels big on a phone — §6a), and crucially a
+     BRIGHTER body colour. The desktop uses --text-dim (#bcc4d4), which is comfortable on
+     a large monitor but washes out at small size on a near-black phone screen (OLED /
+     outdoors). Lift the body to the primary --text so paragraphs read as crisp as the
+     headings. Slightly more line-height aids the larger contrast. */
+  @media (max-width: 767px) {
+    .prose {
+      font-size: calc(1rem * var(--reading-scale, 1)); /* ~15.5px — compact in a justified column */
+      line-height: 1.65;
+      color: var(--text); /* brighter than the desktop --text-dim — phone readability */
+    }
+    .prose :global(h2) {
+      font-size: 1.5rem; /* ~24px */
+    }
+    .prose :global(h3) {
+      font-size: 1.2rem; /* ~19px */
+    }
+    /* secondary prose elements (captions, footnotes, blockquotes) stay dim for hierarchy;
+       only the main running text gets the brightness lift above. */
+    .prose :global(blockquote) {
+      color: var(--text-dim);
+    }
+    /* JUSTIFIED body on mobile (the "centered, both-edges-flush" block the desktop's wide
+       margins give for free). Left edge AND right edge line up, so the paragraph reads as a
+       tidy rectangle with even side margins — not ragged-right/left-aligned.
+       Pair with hyphenation so the narrow column doesn't open ugly word gaps ("rivers").
+       Scope to running text only — never headings, lists, code, or tables. */
+    .prose :global(p) {
+      text-align: justify;
+      -webkit-hyphens: auto;
+      hyphens: auto;
+      hyphenate-limit-chars: 6 3 2; /* only break words ≥6 chars; keep ≥3 before / ≥2 after */
+      word-break: normal;
+      overflow-wrap: break-word; /* last-resort break for very long URLs/tokens, no overflow */
+    }
+  }
+  .prose :global(p) {
+    margin: 0 0 1.4em; /* paragraph rhythm; no indent */
+  }
+  .prose :global(a) {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: var(--accent-dark);
+    text-underline-offset: 2px;
+  }
+  .prose :global(a:hover) {
+    color: var(--hover);
+    text-decoration-color: var(--hover);
+  }
+  /* external-link marker (skip footnote back-refs and heading anchors) */
+  .prose :global(a[href^="http"]:not(.anchor)::after) {
+    content: " ↗";
+    font-size: 0.8em;
+    color: var(--text-faint);
+  }
+  .prose :global(ul),
+  .prose :global(ol) {
+    margin: 0 0 1.15rem;
+    padding-left: 1.3rem;
+  }
+  .prose :global(li) {
+    margin: 0.3rem 0;
+  }
+  .prose :global(blockquote) {
+    margin: 1.5rem 0;
+    padding-left: 1rem;
+    border-left: 2px solid var(--accent-dark);
+    color: var(--text-faint);
+  }
+  .prose :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2.5rem 0;
+  }
+  .prose :global(strong) {
+    color: var(--text);
+  }
+  /* inline code (Expressive Code styles block code itself) */
+  .prose :global(:not(pre) > code) {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+  .prose :global(img) {
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    cursor: zoom-in;
+  }
+  /* generous breathing room around figures + code blocks (2em vertical) */
+  .prose :global(figure) {
+    margin: 2em 0;
+  }
+  .prose :global(.expressive-code),
+  .prose :global(pre) {
+    margin: 2em 0;
+  }
+  /* KaTeX block math: scroll horizontally on narrow screens instead of overflowing */
+  .prose :global(.katex-display) {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 0.5rem;
+  }
+  .prose :global(figcaption) {
+    margin-top: 0.5rem;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+  }
+  /* code block captions: an italic-only paragraph immediately after a code block */
+  .prose :global(.expressive-code + p > em:only-child) {
+    display: block;
+    margin-top: -1.2rem;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    font-style: normal;
+  }
+  /* table scroll wrapper (added by JS) */
+  .prose :global(.table-scroll) {
+    overflow-x: auto;
+    margin: 1.5rem 0;
+  }
+  .prose :global(table) {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.88rem;
+  }
+  .prose :global(th),
+  .prose :global(td) {
+    border: 1px solid var(--border);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+  }
+  .prose :global(th) {
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+  /* footnotes */
+  .prose :global(.footnotes) {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.88rem;
+    color: var(--text-faint);
+  }
+  /* heading anchor (added by JS) */
+  .prose :global(.anchor) {
+    position: absolute;
+    left: -1.2rem;
+    color: var(--text-ghost);
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+  .prose :global(h2:hover .anchor),
+  .prose :global(h3:hover .anchor),
+  .prose :global(.anchor:focus) {
+    opacity: 1;
+  }
+
+  /* ── prev / next ── */
+  .post-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+  @media (max-width: 600px) {
+    .post-nav {
+      grid-template-columns: 1fr; /* §13: stack on mobile */
+    }
+  }
+  .post-nav-link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    transition: border-color 0.15s ease;
+  }
+  .post-nav-link:hover {
+    border-color: var(--hover);
+  }
+  .post-nav-link.next {
+    text-align: right;
+  }
+  .nav-dir {
+    color: var(--text-faint);
+    font-size: 0.72rem;
+  }
+  .nav-title {
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+
+  /* ── reading settings (plain kebab → panel), near the title line ── */
+  .reader-settings {
+    display: none;
+  }
+  @media (min-width: 1000px) {
+    .reader-settings {
+      display: block;
+      position: fixed;
+      right: 1.25rem;
+      /* clear the floating nav + the epoch label stacked beneath it (§B) */
+      top: calc(var(--edge-pad) + 7rem);
+      z-index: 45;
+      transition: opacity 0.25s ease;
+    }
+  }
+  /* Mobile: show the reader-settings kebab as a small floating button bottom-LEFT
+     (mirrors the bottom-right back-to-top; clear of the nav hamburger up top and the
+     dim epoch pill bottom-right). Its panel opens UPWARD so it stays on screen. */
+  @media (max-width: 767px) {
+    .reader-settings {
+      display: block;
+      position: fixed;
+      left: 0.6rem;
+      bottom: 0.6rem;
+      z-index: 46;
+    }
+    .rs-toggle {
+      width: 2.2rem;
+      height: 2.2rem;
+      border-radius: 999px;
+      background: var(--surface-2, rgba(10, 12, 17, 0.8));
+      border: 1.5px solid var(--border-bright);
+      color: var(--text-faint);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      box-shadow: 0 6px 18px rgba(2, 3, 8, 0.5);
+    }
+  }
+  .rs-toggle {
+    background: none;
+    border: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    padding: 0.25rem;
+    display: grid;
+    place-items: center;
+    transition: color 0.15s ease;
+  }
+  .rs-toggle:hover,
+  .reader-settings[data-open] .rs-toggle {
+    color: var(--accent);
+  }
+  .rs-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.5rem);
+    width: 15.5rem;
+    padding: 1rem 1.1rem;
+    background: rgba(10, 12, 17, 0.8);
+    backdrop-filter: blur(16px) saturate(130%);
+    -webkit-backdrop-filter: blur(16px) saturate(130%);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--r-md);
+    box-shadow: 0 16px 40px rgba(2, 3, 8, 0.6);
+    display: grid;
+    gap: 1rem;
+  }
+  .rs-panel[hidden] {
+    display: none;
+  }
+  /* Mobile: the panel is a FIXED bottom sheet (not anchored to the tiny corner button),
+     so it's always fully on-screen. Defined AFTER the base .rs-panel so it wins the
+     cascade. */
+  @media (max-width: 767px) {
+    .rs-panel {
+      position: fixed;
+      left: 0.8rem;
+      right: 0.8rem;
+      bottom: 3.4rem;          /* sit just above the kebab button */
+      top: auto;
+      width: auto;
+      max-width: none;
+      z-index: 70;
+    }
+  }
+  .rs-title {
+    margin: 0 0 0.2rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-faint);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .rs-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .rs-label {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+  .rs-stepper {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+  }
+  .rs-step {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.72rem;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .rs-step + .rs-step {
+    border-left: 1px solid var(--border);
+  }
+  .rs-step:hover {
+    background: var(--surface);
+    color: var(--accent);
+  }
+  .rs-switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    border: 1px solid var(--border-bright);
+    background: var(--surface);
+    cursor: pointer;
+  }
+  .rs-knob {
+    position: absolute;
+    top: 50%;
+    left: 3px;
+    width: 14px;
+    height: 14px;
+    transform: translateY(-50%);
+    border-radius: 50%;
+    background: var(--text-faint);
+    transition: transform 0.2s ease, background 0.2s ease;
+  }
+  .rs-switch[aria-checked="true"] {
+    background: var(--accent-tint);
+    border-color: var(--accent-dark);
+  }
+  .rs-switch[aria-checked="true"] .rs-knob {
+    transform: translate(18px, -50%);
+    background: var(--accent);
+  }
+  .rs-hint {
+    margin: 0;
+    color: var(--text-faint);
+    font-family: var(--font-body);
+    font-size: 0.74rem;
+    line-height: 1.6;
+  }
+  .rs-hint kbd {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    background: var(--surface);
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    padding: 0.05rem 0.35rem;
+  }
+  /* in-panel progress readout (the epoch lives here on mobile) */
+  .rs-progress {
+    color: var(--accent);
+    font-size: var(--t-xs);
+    font-variant-numeric: tabular-nums;
+  }
+  /* in-panel back-to-top action (mobile only; folded in so it's not a 3rd floating button) */
+  .rs-totop {
+    display: none; /* shown only on mobile via the panel */
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-top: 1px solid var(--border);
+    padding: 0.6rem 0 0;
+    margin-top: 0.1rem;
+    color: var(--text-dim);
+    font-size: var(--t-sm);
+    cursor: pointer;
+    transition: color 0.15s ease;
+  }
+  .rs-totop:hover {
+    color: var(--accent);
+  }
+  @media (max-width: 767px) {
+    .rs-totop {
+      display: block;
+    }
+    /* the desktop-only keyboard hint is noise on a phone */
+    .rs-hint {
+      display: none;
+    }
+  }
+  /* progress row + back-to-top are mobile-only; on desktop the floating epoch + to-top
+     button serve those, so hide them in the desktop panel. */
+  @media (min-width: 768px) {
+    .rs-progress-row {
+      display: none;
+    }
+  }
+
+  /* ── focus-mode exit alert: one-time top toast (slides down on enter, then up) ── */
+  .focus-exit {
+    display: none;
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    z-index: 80;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border-bright);
+    border-radius: 999px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    padding: 0.45rem 1rem;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(2, 3, 8, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -160%);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  html.reading-focus .focus-exit {
+    display: inline-flex;
+  }
+  .focus-exit.show {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, 0);
+  }
+  .focus-exit kbd {
+    color: var(--text-dim);
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    padding: 0.05rem 0.35rem;
+  }
+  /* label swap: desktop shows the Esc-hint pill, mobile shows the tappable exit icon */
+  .focus-exit .fe-mobile {
+    display: none;
+  }
+  /* Mobile: there's no keyboard, so focus mode needs a PERSISTENT visible escape.
+     Pin the exit control to the TOP-LEFT and keep it shown the whole time focus mode
+     is active (override the desktop auto-hide toast behavior). */
+  @media (max-width: 767px) {
+    html.reading-focus .focus-exit {
+      display: grid;
+      place-items: center;
+      left: var(--edge-pad);
+      top: var(--edge-pad);
+      transform: none;
+      opacity: 1;
+      pointer-events: auto;
+      /* BARE icon only — no border, no background, no box */
+      width: auto;
+      height: auto;
+      padding: 0.4rem;          /* invisible padding just for a comfortable tap target */
+      border: none;
+      border-radius: 0;
+      background: none;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      color: var(--text);
+    }
+    html.reading-focus .focus-exit:active {
+      color: var(--accent);
+    }
+    /* the .show toggle no longer needs to move it (it's already in place) */
+    html.reading-focus .focus-exit.show {
+      transform: none;
+    }
+    /* swap to the icon */
+    .focus-exit .fe-desktop {
+      display: none;
+    }
+    .focus-exit .fe-mobile {
+      display: block;
+    }
+  }
+
+  /* ── back to top ── */
+  .to-top {
+    position: fixed;
+    right: 0.2rem;
+    bottom: 2.8rem;
+    z-index:50;
+    width: 2.2rem;
+    height: 2.2rem;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1.5px solid var(--border-bright);
+    color: var(--text-faint);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    box-shadow: 0 6px 18px rgba(2, 3, 8, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
+    transition: opacity 0.2s ease, transform 0.2s ease, color 0.15s ease;
+  }
+  .to-top.show {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+  .to-top:hover {
+    color: var(--accent);
+  }
+  /* Mobile: the floating to-top button is folded into the settings panel (one bottom
+     control, not three), so hide the standalone button here. */
+  @media (max-width: 767px) {
+    .to-top {
+      display: none;
+    }
+  }
+
+  /* ── footnote hover popover (appended to body by JS) ── */
+  :global(.fn-pop) {
+    position: absolute;
+    z-index: 90;
+    padding: 0.55rem 0.75rem;
+    background: rgba(10, 12, 17, 0.88);
+    backdrop-filter: blur(14px) saturate(130%);
+    -webkit-backdrop-filter: blur(14px) saturate(130%);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--r-sm);
+    box-shadow: 0 8px 24px rgba(2, 3, 8, 0.5);
+    color: var(--text-faint);
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    line-height: 1.55;
+    pointer-events: auto;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.13s ease, transform 0.13s ease;
+    /* sits above the ref, shifted up by its own height */
+    translate: 0 calc(-100% - 0.5rem);
+  }
+  :global(.fn-pop.visible) {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* ── lightbox ── */
+  .lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    background: rgba(2, 3, 8, 0.9);
+    cursor: zoom-out;
+  }
+  .lightbox[hidden] {
+    display: none;
+  }
+  .lightbox-img {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: var(--r-md);
+    border: 1px solid var(--border-bright);
+  }
+</style>
+
+<script>
+  // ── reading progress bar ──
+  const progressEl = document.querySelector<HTMLElement>(".progress");
+  const fill = document.querySelector<HTMLElement>("[data-progress-fill]");
+  const label = document.querySelector<HTMLElement>("[data-progress-label]");
+  const panelProgress = document.querySelector<HTMLElement>("[data-rs-progress]");
+  const article = document.querySelector<HTMLElement>(".post");
+  const EPOCHS = Math.max(1, parseInt(progressEl?.dataset.epochs ?? "1", 10));
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // back-to-top: fades in after scrolling down; smooth-scrolls up on click
+  const toTop = document.querySelector<HTMLElement>("[data-to-top]");
+  if (toTop) {
+    toTop.addEventListener("click", () =>
+      window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" }),
+    );
+  }
+  // in-panel back-to-top (mobile): scroll up and close the settings panel
+  const rsToTop = document.querySelector<HTMLElement>("[data-rs-totop]");
+  if (rsToTop) {
+    rsToTop.addEventListener("click", () => {
+      window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
+      document.querySelector<HTMLElement>("[data-reader-settings]")?.removeAttribute("data-open");
+      document.querySelector<HTMLElement>("[data-rs-panel]")?.setAttribute("hidden", "");
+      document.querySelector<HTMLElement>("[data-rs-toggle]")?.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  if (fill && article) {
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      const rect = article.getBoundingClientRect();
+      const total = rect.height - window.innerHeight;
+      const scrolled = Math.min(Math.max(-rect.top, 0), Math.max(total, 0));
+      const pct = total > 0 ? Math.round((scrolled / total) * 100) : 100;
+      fill.style.width = `${pct}%`;
+      if (toTop) toTop.classList.toggle("show", window.scrollY > 600);
+      const epochText = pct >= 100
+        ? "converged ✓"
+        : `epoch ${Math.min(EPOCHS, Math.max(1, Math.ceil((pct / 100) * EPOCHS)))}/${EPOCHS} · ${pct}%`;
+      if (label) label.textContent = epochText;
+      if (panelProgress) panelProgress.textContent = epochText;   // mobile: epoch lives in the panel
+    };
+    const onScroll = () => {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(update);
+      }
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  }
+
+  // ── reader enhancements within the prose ──
+  const prose = document.querySelector<HTMLElement>("[data-prose]");
+  if (prose) {
+    // heading anchors (# on hover; click copies the section link)
+    prose.querySelectorAll<HTMLElement>("h2[id], h3[id]").forEach((h) => {
+      const a = document.createElement("a");
+      a.className = "anchor";
+      a.href = `#${h.id}`;
+      a.textContent = "#";
+      a.setAttribute("aria-label", "Link to this section");
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        const url = `${location.origin}${location.pathname}#${h.id}`;
+        history.replaceState(null, "", `#${h.id}`);
+        h.scrollIntoView({ behavior: "smooth" });
+        navigator.clipboard?.writeText(url).catch(() => {});
+      });
+      h.prepend(a);
+    });
+
+    // wrap tables for horizontal scroll on narrow screens
+    prose.querySelectorAll("table").forEach((table) => {
+      if (table.parentElement?.classList.contains("table-scroll")) return;
+      const wrap = document.createElement("div");
+      wrap.className = "table-scroll";
+      table.parentNode?.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    });
+
+    // images → figure + caption (from title/alt) + click-to-zoom lightbox
+    const lightbox = document.querySelector<HTMLElement>("[data-lightbox]");
+    const lightboxImg = document.querySelector<HTMLImageElement>("[data-lightbox-img]");
+    prose.querySelectorAll<HTMLImageElement>("img").forEach((img) => {
+      const caption = img.getAttribute("title") || img.getAttribute("alt");
+      if (img.parentElement?.tagName !== "FIGURE") {
+        const fig = document.createElement("figure");
+        img.parentNode?.insertBefore(fig, img);
+        fig.appendChild(img);
+        if (caption) {
+          const cap = document.createElement("figcaption");
+          cap.textContent = caption;
+          fig.appendChild(cap);
+        }
+      }
+      img.addEventListener("click", () => {
+        if (lightbox && lightboxImg) {
+          lightboxImg.src = img.currentSrc || img.src;
+          lightboxImg.alt = img.alt;
+          lightbox.hidden = false;
+        }
+      });
+    });
+
+    if (lightbox) {
+      lightbox.addEventListener("click", () => (lightbox.hidden = true));
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") lightbox.hidden = true;
+      });
+    }
+
+    // ── footnote hover previews ──
+    // Hover a [1] reference → frosted popover with the footnote text.
+    // Reuses the same style pattern as Term popovers.
+    const fnSection = prose.querySelector<HTMLElement>(".footnotes");
+    if (fnSection) {
+      // build a map: footnote id → text content
+      const fnMap = new Map<string, string>();
+      fnSection.querySelectorAll<HTMLElement>("li[id]").forEach((li) => {
+        // strip the back-ref link text ("↩") from the content
+        const clone = li.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll("a.data-footnote-backref, a[data-footnote-backref]").forEach((a) => a.remove());
+        // also remove plain ↩ symbols
+        fnMap.set(li.id, clone.textContent?.trim().replace(/↩\s*$/, "").trim() ?? "");
+      });
+
+      // create one shared popover element
+      const pop = document.createElement("span");
+      pop.className = "fn-pop";
+      pop.setAttribute("role", "tooltip");
+      document.body.appendChild(pop);
+
+      let hideTimer = 0;
+      const showPop = (ref: HTMLElement, text: string) => {
+        window.clearTimeout(hideTimer);
+        pop.textContent = text;
+        pop.classList.add("visible");
+        // position above the ref
+        const rect = ref.getBoundingClientRect();
+        const popW = Math.min(280, window.innerWidth - 16);
+        let left = rect.left + rect.width / 2 - popW / 2;
+        left = Math.max(8, Math.min(left, window.innerWidth - popW - 8));
+        const top = rect.top + window.scrollY - 8; // will translate up via CSS
+        pop.style.cssText = `left:${left}px; top:${top}px; width:${popW}px;`;
+      };
+      const hidePop = (delay = 120) => {
+        hideTimer = window.setTimeout(() => pop.classList.remove("visible"), delay);
+      };
+
+      // attach to every footnote reference link
+      prose.querySelectorAll<HTMLAnchorElement>("a[data-footnote-ref], sup a[href^='#fn-'], sup a[href^='#user-content-fn']").forEach((a) => {
+        const target = (a.getAttribute("href") ?? "").replace(/^#/, "");
+        // try direct id match, or prefixed variants Astro/remark may emit
+        const text =
+          fnMap.get(target) ??
+          fnMap.get(`user-content-${target}`) ??
+          fnMap.get(target.replace(/^user-content-/, ""));
+        if (!text) return;
+
+        a.addEventListener("mouseenter", () => showPop(a, text));
+        a.addEventListener("mouseleave", () => hidePop());
+        a.addEventListener("focus", () => showPop(a, text));
+        a.addEventListener("blur", () => hidePop(0));
+        pop.addEventListener("mouseenter", () => window.clearTimeout(hideTimer));
+        pop.addEventListener("mouseleave", () => hidePop());
+      });
+    }
+  }
+
+  // ── reading settings: panel toggle · text size · focus mode (in-memory only) ──
+  const settings = document.querySelector<HTMLElement>("[data-reader-settings]");
+  const post = document.querySelector<HTMLElement>(".post");
+  if (settings && post) {
+    const toggle = settings.querySelector<HTMLButtonElement>("[data-rs-toggle]")!;
+    const panel = settings.querySelector<HTMLElement>("[data-rs-panel]")!;
+    const focusSwitch = settings.querySelector<HTMLButtonElement>("[data-focus-toggle]")!;
+
+    const openPanel = (open: boolean) => {
+      panel.hidden = !open;
+      settings.toggleAttribute("data-open", open);
+      toggle.setAttribute("aria-expanded", String(open));
+    };
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openPanel(panel.hidden);
+    });
+    document.addEventListener("click", (e) => {
+      if (!settings.contains(e.target as Node)) openPanel(false);
+    });
+
+    // text size
+    const MIN = 0.85;
+    const MAX = 1.35;
+    const STEP = 0.1;
+    let scale = 1;
+    const applyScale = () => post.style.setProperty("--reading-scale", scale.toFixed(2));
+    settings.querySelector("[data-font-dec]")?.addEventListener("click", () => {
+      scale = Math.max(MIN, +(scale - STEP).toFixed(2));
+      applyScale();
+    });
+    settings.querySelector("[data-font-inc]")?.addEventListener("click", () => {
+      scale = Math.min(MAX, +(scale + STEP).toFixed(2));
+      applyScale();
+    });
+    settings.querySelector("[data-font-reset]")?.addEventListener("click", () => {
+      scale = 1;
+      applyScale();
+    });
+
+    // focus mode (toggle hides header/footer/right-rail/back-to-top; f toggles, Esc exits)
+    // On entering: a one-time top alert tells how to exit (auto-dismisses, never repeats).
+    // While in focus: the epoch box slides in on scroll, then back out after 2s of stillness.
+    const exitAlert = document.querySelector<HTMLElement>("[data-focus-exit]");
+    const epochBox = document.querySelector<HTMLElement>("[data-progress-label]");
+    let exitTimer = 0;
+    let epochTimer = 0;
+    let scrollHandler: (() => void) | null = null;
+    const flashEpoch = () => {
+      epochBox?.classList.add("peek");
+      window.clearTimeout(epochTimer);
+      epochTimer = window.setTimeout(() => epochBox?.classList.remove("peek"), 2000);
+    };
+    const isFocus = () => document.documentElement.classList.contains("reading-focus");
+    const setFocus = (on: boolean) => {
+      document.documentElement.classList.toggle("reading-focus", on);
+      focusSwitch.setAttribute("aria-checked", String(on));
+      if (on) {
+        // one-time top alert
+        exitAlert?.classList.add("show");
+        window.clearTimeout(exitTimer);
+        exitTimer = window.setTimeout(() => exitAlert?.classList.remove("show"), 2500);
+        // epoch box reveals on scroll
+        scrollHandler = () => flashEpoch();
+        window.addEventListener("scroll", scrollHandler, { passive: true });
+      } else {
+        window.clearTimeout(exitTimer);
+        window.clearTimeout(epochTimer);
+        exitAlert?.classList.remove("show");
+        epochBox?.classList.remove("peek");
+        if (scrollHandler) {
+          window.removeEventListener("scroll", scrollHandler);
+          scrollHandler = null;
+        }
+      }
+    };
+    focusSwitch.addEventListener("click", () => setFocus(!isFocus()));
+    document.querySelector("[data-focus-exit]")?.addEventListener("click", () => setFocus(false));
+    document.addEventListener("keydown", (e) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        setFocus(!isFocus());
+      } else if (e.key === "Escape") {
+        setFocus(false);
+        openPanel(false);
+      } else if ((e.key === "j" || e.key === "k" || e.key === "t") && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (reducedMotion && e.key !== "t") return;
+        if (e.key === "t") {
+          e.preventDefault();
+          window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
+          return;
+        }
+        // collect all h2/h3 headings in the prose
+        const headings = Array.from(
+          document.querySelectorAll<HTMLElement>(".prose h2[id], .prose h3[id]")
+        );
+        if (!headings.length) return;
+        e.preventDefault();
+        // find which heading is currently "active" (first one above the viewport midpoint)
+        const mid = window.scrollY + window.innerHeight * 0.35;
+        let current = -1;
+        for (let i = 0; i < headings.length; i++) {
+          if (headings[i].getBoundingClientRect().top + window.scrollY <= mid) current = i;
+        }
+        const target = e.key === "j"
+          ? headings[Math.min(current + 1, headings.length - 1)]
+          : headings[Math.max(current - 1, 0)];
+        target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  }
+</script>

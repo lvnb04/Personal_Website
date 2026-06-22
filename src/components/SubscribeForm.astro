@@ -1,0 +1,144 @@
+---
+// src/components/SubscribeForm.astro — RSS-to-email subscribe card via Follow.it.
+// Drop this component wherever you want a subscribe prompt.
+// After deploying: register your RSS feed at follow.it, copy the form action URL,
+// and replace FOLLOW_IT_ACTION_URL below with it.
+const FOLLOW_IT_ACTION_URL = "FOLLOW_IT_ACTION_URL";
+---
+
+<div class="subscribe-card">
+  <p class="subscribe-label mono">stay in the loop</p>
+  <form
+    class="subscribe-form"
+    action={FOLLOW_IT_ACTION_URL}
+    method="post"
+    target="_blank"
+    rel="noopener noreferrer"
+  >
+    <!-- Follow.it requires this hidden field -->
+    <input type="hidden" name="feed-title" value="Blog" />
+    <div class="subscribe-row">
+      <label for="subscribe-email" class="sr-only">Email address</label>
+      <input
+        id="subscribe-email"
+        class="subscribe-input mono"
+        type="email"
+        name="email"
+        placeholder="you@example.com"
+        required
+        autocomplete="email"
+      />
+      <button class="subscribe-btn mono" type="submit">subscribe</button>
+    </div>
+  </form>
+  <p class="subscribe-hint mono">new posts delivered to your inbox · no spam</p>
+</div>
+
+<style>
+  .subscribe-card {
+    margin: 2rem auto 1rem;
+    padding: 0.7rem 1rem;
+    max-width: 22rem;
+    background: #0f1923;
+    border: 1px solid #2a3a4a;
+    border-radius: var(--r-md);
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .subscribe-label {
+    margin: 0;
+    font-size: 0.7rem;
+    color: #ebdfff;
+    letter-spacing: 0.06em;
+  }
+
+  @media (max-width: 767px) {
+    .subscribe-card {
+      padding: 0.65rem 0.85rem;
+      gap: 0.4rem;
+      max-width: 100%;
+    }
+    .subscribe-label {
+      font-size: 0.6rem;
+    }
+    .subscribe-input {
+      font-size: 0.7rem;
+      padding: 0.28rem 0.5rem;
+    }
+    .subscribe-hint {
+      font-size: 0.58rem;
+    }
+  }
+
+  .subscribe-row {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .subscribe-input {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0.35rem 0.65rem;
+    background: #0a0f14;
+    border: 1px solid #2a3a4a;
+    border-radius: var(--r-sm);
+    color: #d4e4f0;       /* bright cool-white — readable against near-black */
+    font-size: 0.78rem;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+
+  .subscribe-input::placeholder {
+    color: #6a8fa8;       /* visible placeholder — readable but clearly not input text */
+  }
+
+  .subscribe-input:focus {
+    border-color: #4a8fa8;
+  }
+
+  .subscribe-btn {
+    flex-shrink: 0;
+    padding: 0.35rem 0.85rem;
+    background: #1a1030;
+    border: 1px solid #9575cd;
+    border-radius: var(--r-sm);
+    color: #ebdfff;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .subscribe-btn:hover {
+    background: #7c5cbf;
+    border-color: #b39ddb;
+    color: #0a0f14;
+  }
+
+  @media (max-width: 767px) {
+    .subscribe-btn {
+      font-size: 0.68rem;
+      padding: 0.3rem 0.7rem;
+    }
+  }
+
+  .subscribe-hint {
+    margin: 0;
+    font-size: 0.65rem;
+    color: #7eb8d4;       /* same as label — clearly readable */
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+</style>

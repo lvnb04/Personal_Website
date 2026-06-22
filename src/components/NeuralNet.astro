@@ -1,0 +1,2404 @@
+---
+// src/components/NeuralNet.astro
+// Full-mesh seeded SVG neural-net with HTML flanking panels.
+// Left panel: page-name buttons (click→run forward pass, double-click→navigate fast lane).
+// Right panel: output tiles with path + softmax prob (clickable after settle = scenic lane).
+// SVG is pure visualization — no interactive <a> elements inside it.
+import { site } from "@config/site";
+import { NEURAL_NET } from "@config/constants";
+
+const cfg = JSON.stringify(NEURAL_NET);
+const sections = JSON.stringify(site.sections);
+---
+
+<div class="nn-root">
+
+  <!-- LEFT PANEL: page-name buttons -->
+  <nav class="nn-left" aria-label="Navigate to section">
+    {site.sections.map((s, i) => (
+      <a
+        href={s.href}
+        class="nn-btn"
+        data-idx={i}
+        data-href={s.href}
+        aria-label={`Navigate to ${s.label}`}
+      >
+        {s.label}
+      </a>
+    ))}
+  </nav>
+
+  <!-- INPUT VECTOR: chars → token IDs → embedding floats. Sits between left panel and SVG -->
+  <div class="nn-vec-col" id="nn-input-vec" aria-hidden="true">
+    <span class="nn-vec-label" id="nn-input-vec-label">input vector</span>
+    <div class="nn-vec-body">
+      <svg class="nn-bracket" viewBox="0 0 10 100" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M8,2 L3,2 L3,98 L8,98" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="nn-vec-values" id="nn-input-vec-values"></div>
+      <svg class="nn-bracket" viewBox="0 0 10 100" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M2,2 L7,2 L7,98 L2,98" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- CENTER: SVG visualization (pure viz, no interactive nodes) -->
+  <div class="nn-center">
+    <svg id="nn" class="neural-net" aria-hidden="true" focusable="false"></svg>
+  </div>
+
+  <!-- OUTPUT VECTOR: logits → probabilities. Sits between SVG and right panel tiles -->
+  <div class="nn-vec-col" id="nn-output-vec" aria-hidden="true">
+    <span class="nn-vec-label" id="nn-output-vec-label">probabilities</span>
+    <div class="nn-vec-body">
+      <svg class="nn-bracket" viewBox="0 0 10 100" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M8,2 L3,2 L3,98 L8,98" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="nn-vec-values" id="nn-output-vec-values"></div>
+      <svg class="nn-bracket" viewBox="0 0 10 100" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M2,2 L7,2 L7,98 L2,98" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL: output tiles with softmax probs -->
+  <div class="nn-right" aria-live="polite" aria-atomic="true">
+    {site.sections.map((s, i) => (
+      <div class="nn-output-tile" data-out-idx={i} data-href={s.href}>
+        <span class="nn-out-path">/{s.label}</span>
+        <span class="nn-out-prob" data-prob-idx={i}></span>
+        <span class="nn-go" aria-hidden="true">go <span class="nn-go-arrow">→</span></span>
+      </div>
+    ))}
+    <!-- /dev/null joke output -->
+    <div class="nn-output-tile nn-devnull" data-out-idx={site.sections.length}>
+      <span class="nn-out-path">/dev/null</span>
+      <span class="nn-out-prob" data-prob-idx={site.sections.length}></span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Loss + argmax caption — top-right corner, stacked below the socials -->
+<div class="nn-caption mono" id="nn-caption" aria-hidden="true">
+  <span class="nn-cap-loss"></span>
+  <span class="nn-cap-argmax"></span>
+</div>
+
+<!-- Mobile readout pill — single result at the bottom (replaces the desktop softmax
+     row on ≤767px). WINNER only: "→ projects · 84%". Hidden at rest; shown + tappable
+     after a tap-pass settles (see showMobileReadout). -->
+<div class="nn-mobile-readout mono" id="nn-mobile-readout" aria-hidden="true"></div>
+
+<!-- Guiding text -->
+<p class="nn-guide mono">
+  click a page for magic &nbsp;·&nbsp; double-click to miss it
+</p>
+
+<script define:vars={{ cfg, sections }}>
+  const C = JSON.parse(cfg);
+  const SECTIONS = JSON.parse(sections);
+
+  // ── Mulberry32 PRNG (inlined; seededRandom.ts is the source of truth) ────────
+  function mkRng(seed) {
+    let s = seed >>> 0;
+    return () => {
+      s += 0x6d2b79f5;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) >>> 0;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  function svgEl(tag, attrs = {}) {
+    const e = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+    return e;
+  }
+
+  // ── State ─────────────────────────────────────────────────────────────────────
+  let isMobile = window.matchMedia(`(max-width: ${C.mobileBreakpoint}px)`).matches;
+  let animToken = 0;
+  let hoverCount = 0;
+  let lastMisclass = false;
+  let isCommitting = false;
+  let hoverState = "idle"; // "idle" | "hovering" | "settled"
+  let settledOutputIdx = null;
+  let lingerTimer = null;
+  let idleTimer = null;
+  let settleResetTimer = null;
+  // While the boot edges are weaving, FREEZE node positions ON MOBILE ONLY so the weave's
+  // dash math (recomputed from live node positions each frame) operates on stable geometry.
+  // On the tall mobile net the long bottom edges otherwise desync from the top half and pop
+  // at the weave→rest handoff, because drift keeps moving endpoints under the dash reveal.
+  // Desktop is deliberately untouched — its short edges don't exhibit this and its boot is
+  // already correct.
+  let bootWeavingMobile = false;
+
+  // ── Model ─────────────────────────────────────────────────────────────────────
+  // nodes: { bx, by, cx, cy, r, layer, indexInLayer }
+  //   bx/by = base (seeded rest position), cx/cy = current (with drift)
+  // edges: { fromIdx, toIdx, baseOpacity }
+  let MODEL = null;
+
+  function buildModel() {
+    const rng = mkRng(C.seed);
+    const layers = isMobile ? C.layersMobile : C.layersDesktop;
+    // Direction: desktop lays layers out left→right (landscape); mobile stacks them
+    // top→bottom (portrait) so the net fills a phone screen instead of being crushed
+    // into a horizontal sliver. The per-axis math below is shared — only the mapping
+    // of (layerAxis, spreadAxis) → (x, y) flips between the two orientations.
+    const direction = isMobile ? "vertical" : "horizontal";
+    // Pad must be > 43 (r=7 + drift=10 + push=26) so nodes never drift outside the viewBox.
+    // If they touch the edge, Chromium on macOS incorrectly culls them (causing flickering).
+    // MOBILE has NO pointer push (fieldActive() is false on mobile), so it only needs to clear
+    // r(7)+drift(10) ≈ 17 — a smaller pad lets the portrait net spread closer to the box edges
+    // and read BIGGER without overflowing. 22 keeps a safe margin above 17 and off the edge.
+    // REVERT (mobile size): set the mobile branch back to 45 to match desktop.
+    const pad = isMobile ? 22 : 45;
+    // Portrait viewBox on mobile (tall phone), landscape on desktop.
+    //   horizontal: layer axis = X (W), node spread = Y (H)
+    //   vertical:   layer axis = Y (H), node spread = X (W)
+    // Mobile portrait viewBox. WIDE (600) so the middle layer spreads to W-pad and the
+    // diamond reaches the screen edges; NOT too tall (760) so that at full phone width the
+    // resulting height stays under the height cap (i.e. WIDTH is the constraining
+    // dimension → no side letterbox → middle reaches the edges, #3).
+    // Desktop W widened 900→980 so the LAYERS spread further apart horizontally (W is the
+    // layer axis on desktop) → wider net, SAME height (H/720 unchanged, box still 98vh-capped).
+    // The .nn-center CSS ratio below is updated to 980/720 to match (no SVG letterbox).
+    // REVERT (desktop width): set desktop W back to 900 and the CSS calcs back to 900/720.
+    const W = direction === "vertical" ? 600 : 980;
+    const H = direction === "vertical" ? 760 : 720;
+    const nodes = [];
+    const edges = [];
+
+    // Build nodes — spread across the full viewBox with minimal margins
+    const midLayer = Math.floor(layers.length / 2);
+    // Funnel silhouette: the MIDDLE layer uses the full spread; the input and output
+    // layers are COMPRESSED toward the center, so the net reads as a pinched diamond.
+    // The spread factor scales with each layer's distance from the middle.
+    const maxDist = Math.max(midLayer, layers.length - 1 - midLayer) || 1;
+    // Axis lengths: the LAYER axis advances per layer; the SPREAD axis spreads nodes
+    // within a layer. These map to (x,y) per `direction` at push time.
+    const layerAxisLen = direction === "vertical" ? H : W;
+    const spreadAxisLen = direction === "vertical" ? W : H;
+    for (let li = 0; li < layers.length; li++) {
+      const count = layers[li];
+      const usableLayer = layerAxisLen - pad * 2;
+      const usableSpread = spreadAxisLen - pad * 2;
+      // Position along the LAYER axis (X on desktop, Y on mobile).
+      const layerPos = pad + (usableLayer / (layers.length - 1)) * li;
+      // Per-layer spread: funnelPeak at the MIDDLE layer → funnelMin at the ends, tapering
+      // by distance from the middle. This is the diamond silhouette: widest in the middle,
+      // narrowing up AND down to pinched ends.
+      // The middle layer pushes past the usual full-usable width (funnelPeak > 1.0, clamped to
+      // the safe box so nodes never cross the pad), tapering to pinched ends (funnelMin) — a
+      // pronounced diamond that's wider in the middle, same height. Both layouts use this now.
+      //   mobile peak 1.05 — reduced from 1.2 (slightly narrower middle, still a clear diamond)
+      //   desktop peak 1.15 — wider middle, same diamond treatment as mobile
+      // REVERT: mobile → funnelPeak 1.2 / funnelMin 0.5; desktop → funnelPeak 1.0 / funnelMin
+      // C.funnelMinSpread (its original look, where the clamp never bit).
+      const funnelPeak = isMobile ? 1.05 : 1.15;
+      const funnelMin = isMobile ? 0.5 : C.funnelMinSpread;
+      const dist = Math.abs(li - midLayer) / maxDist;          // 0 (mid) … 1 (ends)
+      const spread = funnelPeak - dist * (funnelPeak - funnelMin);   // funnelPeak … funnelMin
+      const spreadCenter = spreadAxisLen / 2;
+      // Safe half-width: nodes must stay within [pad, spreadAxisLen-pad] so a >1.0 peak can't
+      // push them off the viewBox edge (which would trigger Chromium edge-culling/flicker).
+      const spreadHalfMax = spreadAxisLen / 2 - pad;
+      for (let ni = 0; ni < count; ni++) {
+        // base even position along the SPREAD axis, then pull toward (or past) the center.
+        const spreadEven = pad + (usableSpread / (count + 1)) * (ni + 1);
+        let spreadPos = spreadCenter + (spreadEven - spreadCenter) * spread;
+        // Clamp into the safe band so the widened middle never crosses the padding.
+        spreadPos = Math.max(spreadCenter - spreadHalfMax, Math.min(spreadCenter + spreadHalfMax, spreadPos));
+        // Map (layerPos, spreadPos) → (x, y) by orientation.
+        const x = direction === "vertical" ? spreadPos : layerPos;
+        const y = direction === "vertical" ? layerPos : spreadPos;
+        // Radius: input/output larger, mid-net smaller
+        let r;
+        if (li === 0 || li === layers.length - 1) r = 7;
+        else if (li === midLayer) r = 4;
+        else r = 6;
+
+        nodes.push({
+          bx: x, by: y,   // base position
+          cx: x, cy: y,   // current (drift)
+          r,
+          layer: li,
+          indexInLayer: ni,
+          type: li === 0 ? "input" : li === layers.length - 1 ? "output" : "hidden",
+          // Per-node drift params (seeded for determinism)
+          driftAmpX: (rng() * 0.5 + 0.5) * C.driftAmplitude,
+          driftAmpY: (rng() * 0.5 + 0.5) * C.driftAmplitude,
+          driftPhaseX: rng() * Math.PI * 2,
+          driftPhaseY: rng() * Math.PI * 2,
+          driftPeriod: C.driftPeriodMin + rng() * (C.driftPeriodMax - C.driftPeriodMin),
+        });
+      }
+    }
+
+    // Full mesh edges (every node in layer i → every node in layer i+1)
+    // Boot weave grows BOTH halves inward toward the center layer. To reveal a far-half
+    // edge from its OUTER end without a negative stroke-dashoffset (Safari/WebKit cannot
+    // animate negative offsets — it left the whole far half unrevealed), we draw far-half
+    // lines with their endpoints SWAPPED (outer node first). A positive offset reveal then
+    // grows from the outer end inward, identically in every browser. headIdx/tailIdx are
+    // the VISUAL endpoint order; fromIdx/toIdx stay the logical low→high direction the
+    // forward pass relies on.
+    const edgeCenterLayer = Math.floor((layers.length - 1) / 2);
+    let nodeStart = 0;
+    for (let li = 0; li < layers.length - 1; li++) {
+      const aCount = layers[li];
+      const bStart = nodeStart + aCount;
+      const bCount = layers[li + 1];
+      const farHalf = li + 1 > edgeCenterLayer;   // target layer is past the center
+      for (let ai = nodeStart; ai < nodeStart + aCount; ai++) {
+        for (let bi = bStart; bi < bStart + bCount; bi++) {
+          const op = C.edgeOpacityMin + rng() * (C.edgeOpacityMax - C.edgeOpacityMin);
+          edges.push({
+            fromIdx: ai, toIdx: bi, baseOpacity: op,
+            headIdx: farHalf ? bi : ai,   // draw-start endpoint — boot reveal grows from here
+            tailIdx: farHalf ? ai : bi,
+          });
+        }
+      }
+      nodeStart += aCount;
+    }
+
+    return { nodes, edges, W, H, layers };
+  }
+
+  // Build N branching paths from one input node to the winning output node.
+  // Deterministic per (input, winner) via the seeded RNG so routes are stable.
+  function computeSubPath(inputNodeIdx, winnerOutputLayerIdx) {
+    if (!MODEL) return { edgeIdxs: [], nodeIdxs: [] };
+    const { nodes, edges, layers } = MODEL;
+    const layerCount = layers.length;
+    const inputNode = nodes[inputNodeIdx];
+    if (!inputNode) return { edgeIdxs: [], nodeIdxs: [] };
+
+    // index nodes by layer for quick lookup
+    const byLayer = layers.map((_, li) => nodes
+      .map((n, gi) => ({ n, gi }))
+      .filter(o => o.n.layer === li));
+    // edge lookup: "from-to" -> global edge index
+    const edgeKey = new Map();
+    edges.forEach((e, i) => edgeKey.set(e.fromIdx + "-" + e.toIdx, i));
+
+    const rng = mkRng((C.seed ^ (inputNode.indexInLayer * 2654435761) ^ winnerOutputLayerIdx) >>> 0);
+    const edgeSet = new Set();
+    const nodeSet = new Set([inputNodeIdx]);
+    const paths = Math.max(1, C.subPathCount || 3);
+
+    for (let p = 0; p < paths; p++) {
+      let curIdx = inputNodeIdx;
+      for (let li = 1; li < layerCount; li++) {
+        const targets = byLayer[li];
+        let nextIdx;
+        if (li === layerCount - 1) {
+          // final hop: land on the winning output node
+          const winner = targets.find(o => o.n.indexInLayer === winnerOutputLayerIdx);
+          nextIdx = winner ? winner.gi : targets[0].gi;
+        } else {
+          // mid hop: bias the pick toward the winner's vertical position
+          const ideal = winnerOutputLayerIdx / Math.max(1, (layers[layerCount - 1] - 1));
+          const jitter = (rng() - 0.5) * 0.5;
+          const pos = Math.min(0.999, Math.max(0, ideal + jitter));
+          nextIdx = targets[Math.floor(pos * targets.length)].gi;
+        }
+        const ek = curIdx + "-" + nextIdx;
+        if (edgeKey.has(ek)) edgeSet.add(edgeKey.get(ek));
+        nodeSet.add(nextIdx);
+        curIdx = nextIdx;
+      }
+    }
+    return { edgeIdxs: [...edgeSet], nodeIdxs: [...nodeSet] };
+  }
+
+  // ── Vector column helpers ─────────────────────────────────────────────────────
+  // Seeded deterministic token IDs and embedding floats per section
+  function seededTokens(sectionIdx) {
+    const len = (SECTIONS[sectionIdx]?.label || "").length || 4;
+    const rng = mkRng(0xabcdef + sectionIdx * 7919);
+    return Array.from({ length: len }, () => Math.floor(rng() * 9000 + 1000));
+  }
+  // Chars + token-ids stay word-length (all letters visible). The EMBEDDING then
+  // projects down to a FIXED dimension (like a real embedding layer) — 5 dims, which
+  // also balances the 5-value output vector and keeps the column short.
+  const EMBED_DIM = 5;
+  function seededEmbedding(sectionIdx) {
+    const rng = mkRng(0xdeadbeef + sectionIdx * 31337);
+    // 1 decimal → narrow values (e.g. "-0.5"), so the embedding column stays thin.
+    return Array.from({ length: EMBED_DIM }, () => parseFloat((rng() * 2 - 1).toFixed(1)));
+  }
+  function seededLogits(sectionIdx) {
+    const rng = mkRng(0xcafebabe + sectionIdx * 1234);
+    // 5 outputs; winner (= sectionIdx) gets a high positive logit. 1 decimal → narrow.
+    return Array.from({ length: 5 }, (_, i) => {
+      const base = i === sectionIdx ? rng() * 1.5 + 1.8 : rng() * 2 - 1.5;
+      return parseFloat(base.toFixed(1));
+    });
+  }
+  function softmaxFromLogits(logits) {
+    const max = Math.max(...logits);
+    const exps = logits.map(l => Math.exp(l - max));
+    const sum = exps.reduce((a, b) => a + b, 0);
+    return exps.map(e => parseFloat((e / sum).toFixed(2)));
+  }
+
+  // Render values into a .nn-vec-values container; winnerIdx optionally highlighted
+  function renderVecValues(containerId, values, winnerIdx) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = "";
+    // Find which column this container belongs to
+    const colEl = el.closest('.nn-vec-col');
+    const colId = colEl ? colEl.id : null;
+    const colorKey = colId ? currentVecColor[colId] : null;
+    const colors = colorKey ? VEC_COLORS[colorKey] : null;
+
+    values.forEach((v, i) => {
+      const row = document.createElement("div");
+      row.className = "nn-vec-row" + (i === winnerIdx ? " nn-vec-winner" : "");
+      row.dataset.rowIdx = i;
+      row.textContent = v;
+      // Apply current stage color inline
+      if (colors) {
+        row.style.color = (i === winnerIdx) ? colors.winner : colors.row;
+      }
+      row.style.transition = 'color 0.4s ease';
+      el.appendChild(row);
+    });
+  }
+
+  // Color map for vector stages
+  const VEC_COLORS = {
+    'vec-neutral': { row: '#e9edf6', bracket: '#bcc4d4', label: '#828da6', winner: '#e9edf6' },
+    'vec-amber':   { row: '#e3b341', bracket: '#e3b341', label: '#e3b341', winner: '#e3b341' },
+    'vec-teal':    { row: '#5fd3c4', bracket: '#5fd3c4', label: '#5fd3c4', winner: '#5fd3c4' },
+    'vec-accent':  { row: '#7c8cff', bracket: '#7c8cff', label: '#7c8cff', winner: '#a8b1ff' },
+  };
+
+  // Track current color per column so new rows created during scramble get the right color
+  let currentVecColor = {};
+
+  // Set the color theme of a vector column — applies inline styles directly
+  // because dynamically-created elements don't get Astro's scoping attributes
+  function setVecColor(colId, colorKey) {
+    const col = document.getElementById(colId);
+    if (!col) return;
+    const colors = VEC_COLORS[colorKey];
+    if (!colors) return;
+    currentVecColor[colId] = colorKey;
+
+    // Color all value rows
+    col.querySelectorAll('.nn-vec-row').forEach(row => {
+      row.style.color = row.classList.contains('nn-vec-winner') ? colors.winner : colors.row;
+    });
+    // Color brackets
+    col.querySelectorAll('.nn-bracket').forEach(b => { b.style.color = colors.bracket; });
+    // Color label
+    const label = col.querySelector('.nn-vec-label');
+    if (label) label.style.color = colors.label;
+  }
+
+  // Re-apply current color to a column (called after renderVecValues recreates rows)
+  function reapplyVecColor(colId) {
+    const colorKey = currentVecColor[colId];
+    if (colorKey) setVecColor(colId, colorKey);
+  }
+
+  // Scramble animation: cycle through random values then settle on final
+  function scrambleToValues(containerId, finalValues, duration, winnerIdx) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const steps = 5;
+    const interval = duration / steps;
+    let step = 0;
+    const iv = setInterval(() => {
+      step++;
+      if (step >= steps) {
+        clearInterval(iv);
+        renderVecValues(containerId, finalValues, winnerIdx);
+        return;
+      }
+      const rows = el.querySelectorAll(".nn-vec-row");
+      rows.forEach((row, i) => {
+        // Random noise around the final value
+        const noise = (Math.random() - 0.5) * 2;
+        row.textContent = typeof finalValues[i] === "number"
+          ? (finalValues[i] + noise).toFixed(2)
+          : finalValues[i];
+      });
+    }, interval);
+  }
+
+  // Returns a promise that resolves after ms milliseconds (respects animToken)
+  function wait(ms, token) {
+    return new Promise(resolve => {
+      setTimeout(() => resolve(animToken === token), ms);
+    });
+  }
+
+  // showInputVec: returns a promise that resolves when the network should START
+  // Sequence: fade in chars (white) → scramble to token IDs (amber) → resolve
+  function showInputVec(sectionIdx, token) {
+    if (isMobile) return Promise.resolve(true);
+    const col = document.getElementById("nn-input-vec");
+    const label = document.getElementById("nn-input-vec-label");
+    if (!col) return Promise.resolve(true);
+
+    const chars = (SECTIONS[sectionIdx]?.label || "").split("");
+    renderVecValues("nn-input-vec-values", chars, -1);
+    label.textContent = "input vector";
+    setVecColor("nn-input-vec", "vec-neutral"); // Stage 1: white for raw chars
+    col.classList.add("visible");
+
+    // Hold chars for 1s so user reads them, then scramble to token IDs (amber) for 600ms, then start network
+    return wait(1000, token).then(alive => {
+      if (!alive || animToken !== token) return false;
+      return new Promise(resolve => {
+        if (label) label.textContent = "token ids";
+        setVecColor("nn-input-vec", "vec-amber"); // Stage 2: amber for token IDs
+        scrambleToValues("nn-input-vec-values", seededTokens(sectionIdx), 500, -1);
+        setTimeout(() => resolve(animToken === token), 1000);
+      });
+    });
+  }
+
+  function transformInputVecToEmbedding(sectionIdx) {
+    if (isMobile) return;
+    // Stage 3: project the word-length token-ids DOWN to a fixed-dim embedding.
+    // Re-render (not scramble) because the row COUNT changes (word length → EMBED_DIM).
+    const label = document.getElementById("nn-input-vec-label");
+    if (label) label.textContent = "embedding";
+    renderVecValues("nn-input-vec-values", seededEmbedding(sectionIdx), -1);
+    setVecColor("nn-input-vec", "vec-accent");   // iris for embedding floats
+  }
+
+  // showOutputVec: shows logits (amber) then transitions to probabilities (iris)
+  // IMPORTANT: probs computed from same logits so they match the values shown
+  function showOutputVec(sectionIdx, token) {
+    if (isMobile) return;
+    const col = document.getElementById("nn-output-vec");
+    const label = document.getElementById("nn-output-vec-label");
+    if (!col) return;
+
+    const logits = seededLogits(sectionIdx);
+    const probs = softmaxFromLogits(logits);
+
+    renderVecValues("nn-output-vec-values", logits, -1);
+    label.textContent = "logits";
+    setVecColor("nn-output-vec", "vec-amber"); // Stage 4: amber for raw logits
+    col.classList.add("visible");
+
+    // After outputVecProbDelay show "probabilities" label, switch to teal, scramble to
+    // probs. The tiles are timed to react only after this (see runClickPass).
+    setTimeout(() => {
+      if (animToken !== token) return;
+      label.textContent = "probabilities";
+      setVecColor("nn-output-vec", "vec-teal"); // Stage 5: teal for final probs (brighter)
+      scrambleToValues("nn-output-vec-values", probs, 500, sectionIdx);
+    }, C.outputVecProbDelay);
+
+    // Return probs so caller can use the same values in the softmax tiles
+    return probs;
+  }
+
+  function hideInputVec() {
+    const col = document.getElementById("nn-input-vec");
+    if (col) {
+      col.classList.remove("visible");
+      delete currentVecColor["nn-input-vec"];
+      // Reset inline colors
+      col.querySelectorAll('.nn-vec-row').forEach(r => { r.style.color = ''; });
+      col.querySelectorAll('.nn-bracket').forEach(b => { b.style.color = ''; });
+      const label = col.querySelector('.nn-vec-label');
+      if (label) label.style.color = '';
+    }
+  }
+  function hideOutputVec() {
+    const col = document.getElementById("nn-output-vec");
+    if (col) {
+      col.classList.remove("visible");
+      delete currentVecColor["nn-output-vec"];
+      // Reset inline colors
+      col.querySelectorAll('.nn-vec-row').forEach(r => { r.style.color = ''; });
+      col.querySelectorAll('.nn-bracket').forEach(b => { b.style.color = ''; });
+      const label = col.querySelector('.nn-vec-label');
+      if (label) label.style.color = '';
+    }
+  }
+
+  // ── SVG render ────────────────────────────────────────────────────────────────
+  function renderNetwork() {
+    MODEL = buildModel();
+    const { nodes, edges, W, H } = MODEL;
+
+    const svg = document.getElementById("nn");
+    svg.innerHTML = "";
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+    // Edges
+    const edgeG = svgEl("g", { class: "nn-edges" });
+    edges.forEach((edge, i) => {
+      // Draw head→tail (see buildModel): far-half edges are reversed so the boot reveal
+      // can grow inward with a positive (Safari-safe) dashoffset.
+      const a = nodes[edge.headIdx];
+      const b = nodes[edge.tailIdx];
+      const line = svgEl("line", {
+        x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy,
+        stroke: "var(--edge-vis)",
+        // Edge weight varies with seeded base opacity → looks like a *trained* model.
+        "stroke-width": (0.6 + edge.baseOpacity * 1.0).toFixed(2),
+        "data-edge": i,
+        "data-from": edge.fromIdx,
+        "data-to": edge.toIdx,
+        "data-base-op": edge.baseOpacity,
+      });
+      line.style.opacity = edge.baseOpacity;
+      edge.el = line;            // cache ref
+      edgeG.appendChild(line);
+    });
+    svg.appendChild(edgeG);
+
+    // Nodes
+    const nodeG = svgEl("g", { class: "nn-nodes" });
+    nodes.forEach((node, i) => {
+      const isInputOutput = node.type === "input" || node.type === "output";
+      const circle = svgEl("circle", {
+        cx: node.cx, cy: node.cy, r: node.r,
+        fill: isInputOutput ? "var(--node-io-fill)" : "var(--node-h-fill)",
+        stroke: isInputOutput ? "var(--node-io-border)" : "var(--node-h-border)",
+        "stroke-width": isInputOutput ? 1.5 : 1,
+        opacity: isInputOutput ? 1 : 0.8,
+        "data-node": i,
+        class: "nn-node",
+      });
+      node.el = circle;          // cache ref
+      nodeG.appendChild(circle);
+    });
+    svg.appendChild(nodeG);
+
+    // Pulse particle layer (cleared each interaction)
+    const pulseG = svgEl("g", { class: "nn-pulses" });
+    pulseG.setAttribute("aria-hidden", "true");
+    svg.appendChild(pulseG);
+    MODEL.pulseG = pulseG;
+
+    // Softmax at rest
+    updateSoftmax(false, null);
+
+    // Start drift after render
+    startDrift();
+  }
+
+  // ── Ambient drift animation ───────────────────────────────────────────────────
+  let driftRaf = null;
+  let driftStart = null;
+  let breathStart = null;   // set when breathing first turns on, so the swell eases from rest
+  const driftReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function startDrift() {
+    if (driftRaf) cancelAnimationFrame(driftRaf);
+    driftStart = performance.now();
+    function tick(now) {
+      const t = now - driftStart;
+      if (!MODEL) return;
+      const { nodes } = MODEL;
+      // MOBILE-ONLY: hold nodes at their base position while the boot weave is drawing, so
+      // the dash reveal stays glued to static endpoints (no desync/pop on the long bottom
+      // edges). Desktop never sets this flag, so its drift runs exactly as before.
+      if (bootWeavingMobile) {
+        nodes.forEach((node) => {
+          node.cx = node.bx;
+          node.cy = node.by;
+          if (node.el) {
+            node.el.setAttribute("cx", node.cx);
+            node.el.setAttribute("cy", node.cy);
+          }
+        });
+        MODEL.edges.forEach((edge) => {
+          const a = nodes[edge.headIdx];
+          const b = nodes[edge.tailIdx];
+          if (edge.el) {
+            edge.el.setAttribute("x1", a.cx);
+            edge.el.setAttribute("y1", a.cy);
+            edge.el.setAttribute("x2", b.cx);
+            edge.el.setAttribute("y2", b.cy);
+          }
+        });
+        driftRaf = requestAnimationFrame(tick);
+        return;
+      }
+      const havePointer = pointerX !== null && pointerY !== null && fieldActive();
+      nodes.forEach((node) => {
+        const dx = Math.sin(t / node.driftPeriod * Math.PI * 2 + node.driftPhaseX) * node.driftAmpX;
+        const dy = Math.cos(t / node.driftPeriod * Math.PI * 2 + node.driftPhaseY) * node.driftAmpY;
+
+        // Pointer field: push this node away from the cursor if within radius.
+        let tpx = 0, tpy = 0;
+        if (havePointer) {
+          const vx = (node.bx + dx) - pointerX;
+          const vy = (node.by + dy) - pointerY;
+          const dist = Math.hypot(vx, vy);
+          if (dist < FIELD_RADIUS && dist > 0.001) {
+            const falloff = 1 - dist / FIELD_RADIUS;          // 1 at center → 0 at edge
+            const strength = falloff * falloff * FIELD_PUSH;  // ease-out falloff
+            tpx = (vx / dist) * strength;
+            tpy = (vy / dist) * strength;
+          }
+        }
+        // Smoothly approach the target push (spring in AND out, even after cursor leaves)
+        node.pushX = (node.pushX || 0) + (tpx - (node.pushX || 0)) * 0.18;
+        node.pushY = (node.pushY || 0) + (tpy - (node.pushY || 0)) * 0.18;
+
+        node.cx = node.bx + dx + node.pushX;
+        node.cy = node.by + dy + node.pushY;
+        if (node.el) {
+          node.el.setAttribute("cx", node.cx);
+          node.el.setAttribute("cy", node.cy);
+        }
+      });
+
+      // Collective "breathing": a SLOW upward swell of brightness so the resting net
+      // visibly "breathes" without ever competing with the click activation. The idle
+      // base is intentionally subtle (tier 2); breath gently lifts it (tier 3); both
+      // stay below the firing accent (tier 1). Only while idle, never reduced-motion.
+      const breathe = bootBreathReady && !driftReduced && hoverState === "idle" && !isCommitting;
+      // Anchor the breath phase to WHEN breathing first turns on (not the drift clock),
+      // so it always begins at swell=0 (rest) and eases up — no abrupt jump into a
+      // mid-swell phase at the boot→breathe handoff. Reset when breathing pauses.
+      if (breathe) { if (breathStart === null) breathStart = now; }
+      else { breathStart = null; }
+      // Raised half-sine in [0,1]: net rests at base, then gently swells brighter and
+      // settles back — a long, deliberate breath (period = breathPeriodMs). An extra
+      // ease-in over the first breath softens the very first swell after boot.
+      let swell = 0;
+      if (breathe) {
+        const bt = now - breathStart;
+        swell = (1 - Math.cos((bt / C.breathPeriodMs) * Math.PI * 2)) * 0.5;  // 0 → 1 → 0
+        const easeIn = Math.min(1, bt / C.breathPeriodMs);                    // ramp the first cycle
+        swell *= easeIn;
+      }
+      // Mobile gets a bigger idle→peak brightness swing so the breath reads clearly on a
+      // small bright phone screen. Desktop keeps the base amount.
+      const breathAmt = isMobile ? C.breathAmount * C.breathAmountMobileMul : C.breathAmount;
+      const breathLift = swell * breathAmt;
+
+      // Update all edge endpoints to match drifted nodes (head→tail draw order)
+      MODEL.edges.forEach((edge) => {
+        const a = nodes[edge.headIdx];
+        const b = nodes[edge.tailIdx];
+        if (edge.el) {
+          edge.el.setAttribute("x1", a.cx);
+          edge.el.setAttribute("y1", a.cy);
+          edge.el.setAttribute("x2", b.cx);
+          edge.el.setAttribute("y2", b.cy);
+        }
+      });
+
+      if (breathe) {
+        MODEL.edges.forEach((edge) => {
+          if (edge.el) edge.el.style.opacity = (edge.baseOpacity + breathLift).toFixed(3);
+        });
+      }
+
+      driftRaf = requestAnimationFrame(tick);
+    }
+    driftRaf = requestAnimationFrame(tick);
+  }
+
+  // ── Softmax panel ─────────────────────────────────────────────────────────────
+  // Reset-only: blacks out every output tile and clears its probability text.
+  // Tiles are revealed (winner-first, then staggered) exclusively by settleSoftmax,
+  // so nothing can mass-activate them before the probability vector is shown.
+  function updateSoftmax(active, probs) {
+    const totalOutputs = SECTIONS.length + 1; // sections + /dev/null
+    for (let i = 0; i < totalOutputs; i++) {
+      const probEl = document.querySelector(`[data-prob-idx="${i}"]`);
+      const tile = document.querySelector(`[data-out-idx="${i}"]`);
+      if (!probEl || !tile) continue;
+      probEl.textContent = "";
+      tile.classList.remove("nn-tile-winner", "nn-tile-wrong", "nn-tile-active", "nn-tile-revealed");
+    }
+  }
+
+  // Make winner output tile clickable
+  function setOutputClickable(winnerIdx, href) {
+    // Clear all
+    document.querySelectorAll(".nn-output-tile").forEach(t => {
+      t.style.cursor = "";
+      t.onclick = null;
+    });
+    if (winnerIdx == null || !href) return;
+    const tile = document.querySelector(`[data-out-idx="${winnerIdx}"]`);
+    if (tile) {
+      tile.style.cursor = "pointer";
+      tile.onclick = () => location.assign(href);
+    }
+  }
+
+  // Mark the clicked input button as selected; dim the others. Pass null to clear.
+  function setSelectedInput(idx) {
+    document.querySelectorAll(".nn-btn").forEach(btn => {
+      const bIdx = parseInt(btn.getAttribute("data-idx") || "-1");
+      btn.classList.remove("nn-btn-selected", "nn-btn-dimmed");
+      if (idx == null) return;
+      if (bIdx === idx) btn.classList.add("nn-btn-selected");
+      else btn.classList.add("nn-btn-dimmed");
+    });
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  function resetEdges() {
+    if (!MODEL) return;
+    // FIX (macOS Chromium jitter, cycle 2+): when breathing is active the rAF loop
+    // writes edge opacity every ~16ms. A CSS `opacity 0.5s` transition on the same
+    // element restarts every frame → compositor storm on macOS Blink Metal → jitter.
+    // Exclude opacity from the transition while breathingNow; the rAF loop owns it.
+    // Click interactions are unaffected: hoverState !== "idle" → breathingNow = false
+    // → full "stroke 0.5s, opacity 0.5s" transition is preserved as before.
+    const breathingNow = bootBreathReady && !driftReduced && hoverState === "idle" && !isCommitting;
+    MODEL.edges.forEach((edge) => {
+      const line = edge.el;
+      if (!line) return;
+      line.style.transition = breathingNow ? "stroke 0.5s" : "stroke 0.5s, opacity 0.5s";
+      line.setAttribute("stroke", "var(--edge-vis)");
+      line.style.opacity = edge.baseOpacity;
+    });
+  }
+
+  function resetNodes() {
+    if (!MODEL) return;
+    MODEL.nodes.forEach((node) => {
+      const circle = node.el;
+      if (!circle) return;
+      const isIO = node.type === "input" || node.type === "output";
+      circle.style.transition = "fill 0.5s, stroke 0.5s, filter 0.4s, opacity 0.4s";
+      circle.setAttribute("fill", isIO ? "var(--node-io-fill)" : "var(--node-h-fill)");
+      circle.setAttribute("stroke", isIO ? "var(--node-io-border)" : "var(--node-h-border)");
+      circle.setAttribute("stroke-width", isIO ? "1.5" : "1");
+      circle.setAttribute("opacity", isIO ? "1" : "0.8");
+      circle.style.filter = "";
+    });
+  }
+
+  function clearPulses() {
+    if (MODEL && MODEL.pulseG) MODEL.pulseG.innerHTML = "";
+  }
+
+  function resetAll() {
+    resetEdges();
+    resetNodes();
+    clearPulses();
+    setOutputClickable(null, null);
+    hideMobileReadout();
+  }
+
+  // Flash a node (fire visual). emitRipple=false for idle (keeps idle subtle).
+  function flashNode(nodeIdx, color, emitRipple = true) {
+    const node = MODEL.nodes[nodeIdx];
+    const circle = node?.el;
+    if (!circle) return;
+    circle.style.transition = "fill 0.15s, stroke 0.15s, filter 0.15s";
+    circle.setAttribute("fill", "var(--node-active-fill)");
+    circle.setAttribute("stroke", color);
+    circle.style.filter = `drop-shadow(0 0 7px ${color})`;
+    if (emitRipple) spawnRipple(node, color);
+  }
+
+  // Expanding sonar ring on node fire — JS-driven (CSS `r` keyframes are unreliable).
+  // Self-removes when done so no rings linger as "double circles".
+  function spawnRipple(node, color) {
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || !MODEL || !MODEL.pulseG) return;
+    const ring = svgEl("circle", {
+      cx: node.cx, cy: node.cy, r: node.r,
+      fill: "none", stroke: color, "stroke-width": 1.2, opacity: 0.5,
+    });
+    MODEL.pulseG.appendChild(ring);
+    const startR = node.r;
+    const endR = node.r * 3;
+    const dur = 420;
+    let start = null;
+    function frame(now) {
+      if (start === null) start = now;
+      const t = Math.min(1, (now - start) / dur);
+      ring.setAttribute("r", startR + (endR - startR) * t);
+      ring.setAttribute("cx", node.cx);   // track drift
+      ring.setAttribute("cy", node.cy);
+      ring.setAttribute("opacity", (0.5 * (1 - t)).toFixed(3));
+      if (t < 1) requestAnimationFrame(frame);
+      else ring.remove();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // Light an edge
+  function lightEdge(edgeIdx, color, opacity) {
+    const line = MODEL.edges[edgeIdx]?.el;
+    if (!line) return;
+    // FIX (macOS Chromium jitter): same guard as resetEdges — exclude opacity from the
+    // CSS transition while the breathing rAF loop is the active opacity writer.
+    const breathingNow = bootBreathReady && !driftReduced && hoverState === "idle" && !isCommitting;
+    line.style.transition = breathingNow ? "stroke 0.12s" : "stroke 0.12s, opacity 0.12s";
+    line.setAttribute("stroke", color);
+    line.style.opacity = opacity || "0.9";
+  }
+
+  // Animate a glowing dot (+ short trail) from one node to another along their edge.
+  function spawnPulse(fromNodeIdx, toNodeIdx, color, delayMs) {
+    if (!MODEL || !MODEL.pulseG) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) return;                       // no particles under reduced motion
+    const from = MODEL.nodes[fromNodeIdx];
+    const to = MODEL.nodes[toNodeIdx];
+    if (!from || !to) return;
+
+    const trail = Math.max(1, C.pulseTrail || 3);
+    const dots = [];
+    for (let k = 0; k < trail; k++) {
+      const c = svgEl("circle", {
+        r: k === 0 ? 2.6 : 2.6 - k * 0.6,
+        fill: color,
+        opacity: 0,
+      });
+      c.style.filter = `drop-shadow(0 0 4px ${color})`;
+      MODEL.pulseG.appendChild(c);
+      dots.push(c);
+    }
+
+    const dur = C.pulseMs || 280;
+    let start = null;
+    function frame(now) {
+      if (start === null) start = now;
+      const head = Math.min(1, (now - start) / dur);
+      dots.forEach((c, k) => {
+        const lag = k * 0.12;                  // trail spacing
+        const t = Math.max(0, head - lag);
+        const x = from.cx + (to.cx - from.cx) * t;
+        const y = from.cy + (to.cy - from.cy) * t;
+        c.setAttribute("cx", x);
+        c.setAttribute("cy", y);
+        c.setAttribute("opacity", t > 0 && t < 1 ? (1 - k * 0.28).toFixed(2) : "0");
+      });
+      if (head < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        dots.forEach(c => c.remove());
+      }
+    }
+    setTimeout(() => requestAnimationFrame(frame), delayMs || 0);
+  }
+
+  // ── Forward pass — fires ALL neurons + ALL edges, ONE LAYER AT A TIME ─────────
+  // Each layer lights up at a single instant, then the wave HOLDS for `gapMs` before
+  // continuing to the next layer — a slow, clearly-stepped propagation (not a sweep).
+  function forwardPass(inputLayerNodeIdx, winnerOutputLayerIdx, gapMs, token, color, subPath) {
+    if (!color) color = "var(--accent)";
+    return new Promise(resolve => {
+      const { nodes, edges, layers } = MODEL;
+      const layerCount = layers.length;
+      const nodeLayer = nodes.map(n => n.layer);
+      const subEdgeSet = new Set(subPath ? subPath.edgeIdxs : []);
+
+      // Find input layer index from the global node index
+      const inputNode = nodes[inputLayerNodeIdx];
+      if (!inputNode) return resolve(null);
+
+      // Flash input node immediately
+      flashNode(inputLayerNodeIdx, color);
+
+      let li = 1;
+      function fireLayer() {
+        if (animToken !== token) return resolve(null);
+        if (li >= layerCount) return resolve({ winnerLayerIdx: winnerOutputLayerIdx });
+
+        // Fire ALL nodes in this layer + ALL incoming edges at one instant.
+        const incomingEdges = edges.filter(e => nodeLayer[e.toIdx] === li);
+        incomingEdges.forEach((edge) => {
+          const gi = edges.indexOf(edge);
+          if (subEdgeSet.has(gi)) {
+            lightEdge(gi, color, "1");        // sub-path: brightest
+            spawnPulse(edge.fromIdx, edge.toIdx, color, 0);
+          } else {
+            lightEdge(gi, color, "0.72");     // flood: brighter so the firing pass reads more vividly (same hue)
+          }
+          flashNode(edge.toIdx, color);
+        });
+
+        li++;
+        setTimeout(fireLayer, gapMs);   // hold, THEN continue to the next layer
+      }
+
+      // First layer fires after one gap so the input flash reads on its own first.
+      setTimeout(fireLayer, gapMs);
+    });
+  }
+
+  // Highlight the winning output node after softmax settles — separate from the wave
+  function glowWinnerNode(winnerOutputLayerIdx, color) {
+    if (!MODEL) return;
+    const { nodes, layers } = MODEL;
+    const lastLayerIdx = layers.length - 1;
+    nodes.filter(n => n.layer === lastLayerIdx).forEach(n => {
+      const circle = n.el;
+      if (!circle) return;
+      if (n.indexInLayer === winnerOutputLayerIdx) {
+        circle.style.transition = "fill 0.2s, stroke 0.2s, filter 0.25s, opacity 0.2s";
+        circle.setAttribute("fill", "var(--node-active-fill)");
+        circle.setAttribute("stroke", color);
+        circle.setAttribute("stroke-width", "2.5");
+        circle.style.filter = `drop-shadow(0 0 12px ${color})`;
+        circle.setAttribute("opacity", "1");
+      } else {
+        circle.style.transition = "opacity 0.3s";
+        circle.setAttribute("opacity", "0.35");
+      }
+    });
+  }
+
+  // Reveal the result tiles in order: WINNER first (alone), then the other tiles
+  // fade in one-by-one. Nothing here runs until the output vector's probabilities
+  // are fully visible (see runClickPass timing), so the answer is read from the vector.
+  function settleSoftmax(winnerIdx, wrong) {
+    // Use the same logit-derived probs as the output vector so tiles and vector match
+    const logits = seededLogits(wrong ? (winnerIdx + 1) % SECTIONS.length : winnerIdx);
+    const rawProbs = softmaxFromLogits(logits);
+    const valFor = (i) => {
+      if (i === winnerIdx) return rawProbs[winnerIdx] ?? (wrong ? 0.61 : 0.92);
+      if (i < rawProbs.length) return rawProbs[i];
+      return 0.01;
+    };
+    const totalOutputs = SECTIONS.length + 1;
+
+    // 1) Winner tile ONLY — others stay invisible (opacity:0 at rest).
+    const winTile = document.querySelector(`[data-out-idx="${winnerIdx}"]`);
+    const winProb = document.querySelector(`[data-prob-idx="${winnerIdx}"]`);
+    if (winTile) {
+      winTile.classList.add("nn-tile-active", wrong ? "nn-tile-wrong" : "nn-tile-winner");
+    }
+    if (winProb) winProb.textContent = Math.round(valFor(winnerIdx) * 100) + "%";
+
+    // On the wrong/backprop beat we don't reveal the rest (the net re-runs anyway).
+    if (wrong) return;
+
+    // 2) Then gradually reveal the other tiles, one at a time.
+    const staggerDelay = 220;  // ms between each non-winner tile
+    let delay = 650;           // initial pause after the winner lands
+    for (let i = 0; i < totalOutputs; i++) {
+      if (i === winnerIdx) continue;
+      const tileIdx = i;
+      setTimeout(() => {
+        const tile = document.querySelector(`[data-out-idx="${tileIdx}"]`);
+        const prob = document.querySelector(`[data-prob-idx="${tileIdx}"]`);
+        if (prob) prob.textContent = Math.round(valFor(tileIdx) * 100) + "%";
+        if (tile && !tile.classList.contains("nn-tile-winner")) {
+          tile.classList.add("nn-tile-active", "nn-tile-revealed");
+        }
+      }, delay);
+      delay += staggerDelay;
+    }
+  }
+
+  // ── Caption (loss + argmax) — top-right corner, two stacked lines ────────────
+  function showCaption(lossText, argmaxText, state /* "ok" | "wrong" */) {
+    const cap = document.getElementById("nn-caption");
+    if (!cap) return;
+    cap.querySelector(".nn-cap-loss").textContent   = lossText || "";
+    cap.querySelector(".nn-cap-argmax").textContent = argmaxText || "";
+    cap.classList.toggle("is-wrong", state === "wrong");
+    cap.classList.add("visible");
+  }
+  function hideCaption() {
+    document.getElementById("nn-caption")?.classList.remove("visible");
+  }
+
+  // ── Mobile result arch (mobile output, §3c) ─────────────────────────────────
+  // WINNER sits center-bottom as a tappable pill (label + %). The OTHER sections arc UP
+  // over it in a dome (label only, no %). Tapping the winner navigates (two-step: tap
+  // input → see result → tap winner to go). Cleared on reset.
+  function showMobileReadout(sectionIdx) {
+    const el = document.getElementById("nn-mobile-readout");
+    if (!el) return;
+    const label = SECTIONS[sectionIdx]?.label || "";
+    const href = SECTIONS[sectionIdx]?.href;
+    // Reuse the same seeded softmax the desktop uses, so the % reads as "real".
+    const probs = softmaxFromLogits(seededLogits(sectionIdx));
+    const pct = Math.round((probs[sectionIdx] ?? 0.93) * 100);
+    el.innerHTML = `/${label} · ${pct}% <span class="nn-readout-go">go <span class="nn-go-arrow">→</span></span>`;
+    el.classList.add("visible");
+    el.setAttribute("aria-hidden", "false");
+    el.onclick = href ? () => location.assign(href) : null;
+  }
+  function hideMobileReadout() {
+    const el = document.getElementById("nn-mobile-readout");
+    if (!el) return;
+    el.classList.remove("visible");
+    el.setAttribute("aria-hidden", "true");
+    el.onclick = null;
+  }
+
+  // ── Guide line (bottom hint) — slide+fade out while the net is working, back at idle ─
+  function hideGuide() {
+    document.querySelector(".nn-guide")?.classList.add("nn-guide-hidden");
+  }
+  function showGuide() {
+    document.querySelector(".nn-guide")?.classList.remove("nn-guide-hidden");
+  }
+
+  // ── Backprop ──────────────────────────────────────────────────────────────────
+  function runBackprop(wrongOutputLayerIdx, token) {
+    return new Promise(resolve => {
+      const { nodes, edges, layers } = MODEL;
+      const nodeLayer = nodes.map(n => n.layer);
+      const msPerLayer = 180;
+
+      let li = layers.length - 1;
+      function prevLayer() {
+        if (animToken !== token) return resolve();
+        if (li < 0) return resolve();
+        const incomingEdges = edges.filter(e => nodeLayer[e.toIdx] === li);
+        incomingEdges.forEach(edge => {
+          lightEdge(edges.indexOf(edge), "var(--amber)", "0.6");
+        });
+        li--;
+        setTimeout(prevLayer, msPerLayer);
+      }
+      prevLayer();
+    });
+  }
+
+  // ── Main click pass logic (replaces hover-based interaction) ─────────────────────────
+  // ── Auto-reset: return network to idle after settled result is shown ──────
+  function scheduleAutoReset(token) {
+    clearTimeout(settleResetTimer);
+    settleResetTimer = setTimeout(() => {
+      if (animToken !== token) return;   // another interaction took over
+      if (hoverState !== "settled") return;
+      hoverState = "idle";
+      animToken++;
+      settledOutputIdx = null;
+      activePassIdx = null;
+      resetAll();
+      updateSoftmax(false, null);
+      hideCaption();
+      hideInputVec();
+      hideOutputVec();
+      setOutputClickable(null, null);
+      setSelectedInput(null);
+      showGuide();   // hint slides back in as the net returns to idle
+      scheduleIdlePulse();
+    }, C.settledLingerMs);
+  }
+
+  function runClickPass(inputIdx) {
+    skipBoot();
+    if (isCommitting) return;
+    if (hoverState === "hovering") return;
+
+    hoverState = "hovering";
+    hideGuide();   // slide the bottom hint out while the net works; restored at idle
+    clearTimeout(lingerTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(settleResetTimer);
+    resetAll();
+
+    const node = MODEL.nodes[inputIdx];
+    setSelectedInput(node.indexInLayer);   // glow clicked input button, dim the rest
+    const correctOutputIdx = node.indexInLayer;
+    const correctSub = computeSubPath(inputIdx, correctOutputIdx);
+    const token = ++animToken;
+
+    hoverCount++;
+    const doMisclass = hoverCount > 1 && !lastMisclass && Math.random() < C.misclassRate;
+    lastMisclass = doMisclass;
+
+    // ── Step 1: show input vector (chars → token IDs), THEN start network ────────
+    showInputVec(correctOutputIdx, token).then(alive => {
+      if (!alive || animToken !== token) return;
+
+      // ── Step 2: forward pass wave (embedding transform happens mid-pass) ─────────
+      // Transform input vec to embedding floats as the wave clears the first hidden layer.
+      setTimeout(() => { if (animToken === token) transformInputVecToEmbedding(correctOutputIdx); }, C.waveLayerGapMs);
+
+      if (doMisclass) {
+        const wrongIdx = (correctOutputIdx + 1 + Math.floor(Math.random() * (SECTIONS.length - 1))) % SECTIONS.length;
+        const wrongSub = computeSubPath(inputIdx, wrongIdx);
+
+        forwardPass(inputIdx, wrongIdx, C.waveLayerGapMs, token, "var(--amber)", wrongSub).then(result => {
+          if (animToken !== token || !result) return;
+
+          // ── Step 3: output vector shows logits→probs FIRST; the wrong tile appears
+          // only after probabilities are fully visible. ────────────────────────────
+          showOutputVec(wrongIdx, token);
+          setTimeout(() => {
+            if (animToken !== token) return;
+            settleSoftmax(wrongIdx, true);   // wrong tile only (no stagger on the wrong beat)
+            glowWinnerNode(wrongIdx, "var(--amber)");
+            showCaption("loss: 0.87 — backpropagating…", "", "wrong");
+          }, C.outputVecProbDelay + 700);
+
+          setTimeout(() => {
+            if (animToken !== token) return;
+            runBackprop(wrongIdx, token).then(() => {
+              if (animToken !== token) return;
+              hideCaption();
+              hideOutputVec();
+              resetAll();
+              updateSoftmax(false, null);
+              setTimeout(() => {
+                if (animToken !== token) return;
+                forwardPass(inputIdx, correctOutputIdx, C.waveLayerGapFastMs, token, "var(--accent)", correctSub).then(r2 => {
+                  if (animToken !== token || !r2) return;
+                  // Same rule on the corrected re-run: logits→probs first, then tiles.
+                  showOutputVec(correctOutputIdx, token);
+                  hoverState = "settled";
+                  setTimeout(() => {
+                    if (animToken !== token) return;
+                    settleSoftmax(correctOutputIdx, false);
+                    settledOutputIdx = correctOutputIdx;   // enable Enter-to-accept
+                    glowWinnerNode(correctOutputIdx, "var(--hover)");
+                    setOutputClickable(correctOutputIdx, SECTIONS[correctOutputIdx]?.href);
+                    showCaption("loss: 0.04 ✓", `argmax → /${SECTIONS[correctOutputIdx]?.label}`, "ok");
+                    scheduleAutoReset(token);
+                  }, C.outputVecProbDelay + 700);
+                });
+              }, 180);
+            });
+          }, C.outputVecProbDelay + 1700);  // after wrong answer settles + lingers
+        });
+
+      } else {
+        forwardPass(inputIdx, correctOutputIdx, C.waveLayerGapMs, token, "var(--accent)", correctSub).then(result => {
+          if (animToken !== token || !result) return;
+
+          // ── Step 3: ONLY the output vector changes — logits → probabilities.
+          // No output tiles react during this window. ──────────────────────────────
+          showOutputVec(correctOutputIdx, token);   // logits now, probs at +outputVecProbDelay
+          // ── Step 4: probabilities now fully visible → reveal the WINNER tile only,
+          // then settleSoftmax staggers in the other tiles one-by-one. ─────────────
+          setTimeout(() => {
+            if (animToken !== token) return;
+            hoverState = "settled";
+            settleSoftmax(correctOutputIdx, false);
+            settledOutputIdx = correctOutputIdx;   // enable Enter-to-accept
+            glowWinnerNode(correctOutputIdx, "var(--hover)");
+            setOutputClickable(correctOutputIdx, SECTIONS[correctOutputIdx]?.href);
+            showCaption("loss: 0.04 ✓", `argmax → /${SECTIONS[correctOutputIdx]?.label}`, "ok");
+            scheduleAutoReset(token);
+          }, C.outputVecProbDelay + 700);
+        });
+      }
+    });
+  }
+
+  function endHover() {
+    if (hoverState !== "settled") {
+      hoverState = "idle";
+      animToken++;
+      resetAll();
+      updateSoftmax(false, null);
+      hideCaption();
+      hideInputVec();
+      hideOutputVec();
+      setSelectedInput(null);
+      showGuide();
+      scheduleIdlePulse();
+      return;
+    }
+    clearTimeout(lingerTimer);
+    lingerTimer = setTimeout(() => {
+      hoverState = "idle";
+      animToken++;
+      settledOutputIdx = null;
+      resetAll();
+      updateSoftmax(false, null);
+      hideCaption();
+      hideInputVec();
+      hideOutputVec();
+      setOutputClickable(null, null);
+      setSelectedInput(null);
+      showGuide();
+      scheduleIdlePulse();
+    }, C.settledLingerMs);
+  }
+
+  // ── Click to navigate (fast lane) ────────────────────────────────────────────
+  // instant=true → navigate like a plain link with NO forward-pass animation.
+  // Used by the double-click / second-click escape hatches: the user has signalled
+  // intent, so we don't show any theater — just go.
+  function handleBtnClick(e, sectionIdx, instant = false) {
+    skipBoot();
+    hideGuide();
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    const href = SECTIONS[sectionIdx]?.href;
+    if (!href) return;
+
+    if (isCommitting) { location.assign(href); return; }
+
+    isCommitting = true;
+    hoverState = "idle";
+    clearTimeout(lingerTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(settleResetTimer);
+
+    // Plain-link path: tear down any in-flight animation and go straight there.
+    if (instant) {
+      animToken++;            // invalidate any running pass so it can't paint after we leave
+      resetAll();
+      hideInputVec();
+      hideOutputVec();
+      location.assign(href);
+      return;
+    }
+
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) { location.assign(href); return; }
+
+    const token = ++animToken;
+    const inputIdx = MODEL.nodes.findIndex(n => n.layer === 0 && n.indexInLayer === sectionIdx);
+
+    const escapeHandler = () => location.assign(href);
+    document.addEventListener("keydown", escapeHandler, { once: true });
+
+    hideInputVec();
+    hideOutputVec();
+    resetAll();
+    const sub = computeSubPath(inputIdx, sectionIdx);
+    forwardPass(inputIdx, sectionIdx, C.waveLayerGapFastMs, token, undefined, sub).then(result => {
+      document.removeEventListener("keydown", escapeHandler);
+      if (animToken !== token || !result) return;
+      setTimeout(() => location.assign(href), 220);
+    });
+  }
+
+  // ── Mobile: tap input → pass → lit RESULT PILL (tappable) → linger → auto-reset ──
+  // Two-step on mobile: the pass plays, then the result pill lights as a button the
+  // user taps to navigate (mirrors desktop's scenic lane). The settled state lingers
+  // (settledLingerMs) so it doesn't vanish. A second tap on the SAME input while it's
+  // running/settled skips straight to the page.
+  function runMobilePass(sectionIdx) {
+    skipBoot();
+    const href = SECTIONS[sectionIdx]?.href;
+    if (!href) return;
+
+    // Second tap on the same section while running/settled → go now (impatience).
+    if ((hoverState === "hovering" || hoverState === "settled") && activePassIdx === sectionIdx) {
+      animToken++;
+      location.assign(href);
+      return;
+    }
+
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) { location.assign(href); return; }   // no theater under reduced motion
+
+    // Tear down any in-flight/settled pass (e.g. tapping a different input).
+    clearTimeout(lingerTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(settleResetTimer);
+    animToken++;
+    resetAll();
+
+    hoverState = "hovering";
+    activePassIdx = sectionIdx;
+    hideGuide();
+    const inputIdx = MODEL.nodes.findIndex(n => n.layer === 0 && n.indexInLayer === sectionIdx);
+    setSelectedInput(sectionIdx);
+    const sub = computeSubPath(inputIdx, sectionIdx);
+    const token = ++animToken;
+
+    // Mobile has the SAME 5 layers as desktop, but no input/output vector beats bracketing
+    // the pass — so a LARGER per-layer hold (waveLayerGapMobileMs) is used so each layer
+    // clearly snaps on, holds, then the next fires (hop-by-hop), restoring the deliberate
+    // feel desktop gets from its vector phases. Desktop's gap (waveLayerGapMs) is unchanged.
+    forwardPass(inputIdx, sectionIdx, C.waveLayerGapMobileMs, token, "var(--accent)", sub).then(result => {
+      if (animToken !== token || !result) return;
+      hoverState = "settled";
+      settledOutputIdx = sectionIdx;          // enables Enter-to-accept too
+      glowWinnerNode(sectionIdx, "var(--hover)");
+      showMobileReadout(sectionIdx);          // lit, tappable pill
+      scheduleMobileReset(token);
+    });
+  }
+
+  // Linger then fade back to idle (mobile) — mirrors scheduleAutoReset on desktop.
+  function scheduleMobileReset(token) {
+    clearTimeout(settleResetTimer);
+    settleResetTimer = setTimeout(() => {
+      if (animToken !== token || hoverState !== "settled") return;
+      hoverState = "idle";
+      animToken++;
+      settledOutputIdx = null;
+      activePassIdx = null;
+      resetAll();
+      hideMobileReadout();
+      setSelectedInput(null);
+      showGuide();
+      scheduleIdlePulse();
+    }, C.settledLingerMs + 2000);   // mobile lingers ~2s longer — no hover, so the tap target must dwell
+  }
+
+  // ── Idle pulse ────────────────────────────────────────────────────────────────
+  function scheduleIdlePulse() {
+    clearTimeout(idleTimer);
+    const delay = C.idleIntervalMin + Math.random() * (C.idleIntervalMax - C.idleIntervalMin);
+    idleTimer = setTimeout(runIdlePulse, delay);
+  }
+
+  function runIdlePulse() {
+    if (isCommitting || hoverState !== "idle") { scheduleIdlePulse(); return; }
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) { scheduleIdlePulse(); return; }
+
+    const token = animToken;
+    const { nodes, edges, layers } = MODEL;
+    const nodeLayer = nodes.map(n => n.layer);
+
+    // Pick random input node
+    const inputNodes = nodes.filter(n => n.layer === 0);
+    const pick = inputNodes[Math.floor(Math.random() * inputNodes.length)];
+    const pickIdx = nodes.indexOf(pick);
+
+    const msPerLayer = 280;
+    let li = 1;
+    function nextIdleLayer() {
+      if (animToken !== token) return scheduleIdlePulse();
+      if (li >= layers.length) {
+        setTimeout(() => {
+          if (animToken === token) resetEdges();
+          scheduleIdlePulse();
+        }, 500);
+        return;
+      }
+      // Light all incoming edges for this layer at dim level
+      edges.filter(e => nodeLayer[e.toIdx] === li).forEach(e => {
+        lightEdge(edges.indexOf(e), "var(--text-ghost)", "0.25");
+      });
+      li++;
+      setTimeout(nextIdleLayer, msPerLayer);
+    }
+    flashNode(pickIdx, "var(--text-ghost)", false);  // no ripple in idle (stays subtle)
+    nextIdleLayer();
+  }
+
+  // ── Wire left panel buttons ──────────────────────────────────────────────────
+  // Click model (CLAUDE.md §10, "Apple is fast"): the FIRST click runs the inference
+  // pass immediately (no debounce). A SECOND click — on the same section while its
+  // pass is still playing/settled — is read as intent and navigates instantly.
+  // Clicking a DIFFERENT section mid-pass restarts the pass for that one.
+  let activePassIdx = null;   // section idx whose pass is currently playing/settled
+
+  // Pending single-click timer: a click waits briefly to see if a SECOND click is
+  // coming. If it is, that's a double-click → navigate like a plain link, no theater
+  // ever starts (so no brief net-flash before the page opens). If no second click
+  // arrives within the window, the theater runs. dblClickWindowMs is the OS-standard
+  // double-click delay — short enough not to read as lag on a single click.
+  let pendingClickTimer = null;
+  let pendingClickIdx = null;
+
+  // Actually start the inference theater for a section (the deferred single-click path).
+  function startClickTheater(idx) {
+    const inputIdx = MODEL.nodes.findIndex(n => n.layer === 0 && n.indexInLayer === idx);
+    if (inputIdx === -1) return;
+
+    // Switching sections mid-pass (or re-running): tear down the current pass first.
+    if (hoverState === "settled" || hoverState === "hovering") {
+      hoverState = "idle";
+      animToken++;
+      clearTimeout(settleResetTimer);
+      resetAll();
+      updateSoftmax(false, null);
+      hideCaption();
+      hideInputVec();
+      hideOutputVec();
+    }
+
+    activePassIdx = idx;
+    runClickPass(inputIdx);
+    // Highlight matching input node
+    const circle = document.querySelector(`[data-node="${inputIdx}"]`);
+    if (circle) {
+      circle.setAttribute("stroke", "var(--accent)");
+      circle.style.filter = "drop-shadow(0 0 6px var(--accent))";
+    }
+  }
+
+  function wireButtons() {
+    document.querySelectorAll(".nn-btn").forEach(btn => {
+      const idx = parseInt(btn.getAttribute("data-idx") || "0");
+
+      btn.addEventListener("click", e => {
+        if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        e.preventDefault();
+
+        // Mobile: tap input → pass → lit result pill → tap pill to go (two-step).
+        // A 2nd tap on the same input while running/settled skips straight there.
+        if (isMobile) {
+          e.preventDefault();
+          runMobilePass(idx);
+          return;
+        }
+
+        // ── Double-click → plain-link navigation, no theater ───────────────────
+        // A second click on the SAME section while the first is still pending its
+        // theater (timer not yet fired) is a double-click: cancel the pending
+        // theater and navigate straight to the destination — no net-flash.
+        if (pendingClickTimer !== null && pendingClickIdx === idx) {
+          clearTimeout(pendingClickTimer);
+          pendingClickTimer = null;
+          pendingClickIdx = null;
+          handleBtnClick(e, idx, true);   // plain-link nav, no theater
+          return;
+        }
+        // Second click on the SAME section whose theater is already running/settled
+        // → navigate now (impatience escape hatch).
+        if (activePassIdx === idx && (hoverState === "hovering" || hoverState === "settled")) {
+          handleBtnClick(e, idx, true);   // intent signalled → go instantly
+          return;
+        }
+
+        if (isCommitting) { handleBtnClick(e, idx); return; }
+
+        // First click: defer the theater briefly so a double-click can pre-empt it.
+        if (pendingClickTimer !== null) clearTimeout(pendingClickTimer);
+        pendingClickIdx = idx;
+        pendingClickTimer = setTimeout(() => {
+          pendingClickTimer = null;
+          pendingClickIdx = null;
+          startClickTheater(idx);
+        }, C.dblClickWindowMs);
+      });
+    });
+  }
+
+  // Enter key after settled pass → navigate to winner
+  document.addEventListener("keydown", e => {
+    if (e.key === "Enter" && hoverState === "settled" && settledOutputIdx != null) {
+      const href = SECTIONS[settledOutputIdx]?.href;
+      if (href) location.assign(href);
+    }
+  });
+
+  // wireMobile is now handled inside wireButtons (isMobile check)
+  function wireMobile() { }
+
+  // ── Breakpoint rebuild ────────────────────────────────────────────────────────
+  const mq = window.matchMedia(`(max-width: ${C.mobileBreakpoint}px)`);
+  mq.addEventListener("change", e => {
+    isMobile = e.matches;
+    animToken++;
+    isCommitting = false;
+    hoverState = "idle";
+    if (driftRaf) cancelAnimationFrame(driftRaf);
+    hideMobileReadout();
+    setGuideText();
+    renderNetwork();
+    wireButtons();
+    wireMobile();
+  });
+
+  // ── Cinematic boot ─────────────────────────────────────────────────────────
+  let bootDone = false;
+  let bootBreathReady = false;   // breathing stays OFF until phase D
+  function runBoot() {
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || !MODEL) { bootDone = true; bootBreathReady = true; return; }
+    const { nodes, edges, layers } = MODEL;
+    const EASE = "cubic-bezier(0.22, 0.61, 0.36, 1)";
+
+    // hide everything to start
+    nodes.forEach(n => {
+      if (!n.el) return;
+      n.el.style.transition = "none";
+      n.el.style.transformBox = "fill-box";
+      n.el.style.transformOrigin = "center";
+      n.el.style.opacity = "0";
+      n.el.style.transform = "scale(0.2)";
+    });
+    // Symmetric inward weave (desktop AND mobile — both have an odd layer count with a
+    // true center): the two halves grow toward the center layer, meeting at the core last.
+    // The far-half lines are drawn REVERSED (head = outer node; see buildModel), so a single
+    // POSITIVE dashoffset reveal (len → 0) grows EVERY edge from its outer end inward. We no
+    // longer use a negative dashoffset for the far half — Safari/WebKit cannot animate
+    // negative offsets, which left one whole side unrevealed.
+    const centerLayer = Math.floor((layers.length - 1) / 2);
+    edges.forEach(e => {
+      if (!e.el) return;
+      const len = Math.hypot(nodes[e.toIdx].bx - nodes[e.fromIdx].bx, nodes[e.toIdx].by - nodes[e.fromIdx].by);
+      // Positive hide: full offset → stroke fully retracted; reveal animates it to 0.
+      e._bootLen = len;
+      e.el.style.strokeDasharray = len;
+      e.el.style.strokeDashoffset = e._bootLen;
+      e.el.style.transition = "none";
+      e.el.style.opacity = "0";
+    });
+    const btns = [...document.querySelectorAll(".nn-btn")];
+    btns.forEach(b => { b.style.transition = "none"; b.style.opacity = "0"; b.style.transform = "translateY(12px)"; });
+    const guide = document.querySelector(".nn-guide");
+    let guideFull = "";
+    if (guide) { guideFull = guide.textContent.replace(/\s+/g, " ").trim(); guide.textContent = ""; }
+
+    let t = C.bootStartDelayMs;   // PHASE A (name/socials) is handled by CSS delay in index.astro; net waits.
+
+    // ── PHASE B: nodes materialize, layer by layer ───────────────────────────
+    for (let li = 0; li < layers.length; li++) {
+      const layerNodes = nodes.filter(n => n.layer === li);
+      layerNodes.forEach((n, i) => {
+        setTimeout(() => {
+          if (bootDone) return;
+          n.el.style.transition = `opacity ${C.bootNodeFadeMs}ms ${EASE}, transform ${C.bootNodeFadeMs}ms ${EASE}`;
+          n.el.style.opacity = (n.type === "input" || n.type === "output") ? "1" : "0.8";
+          n.el.style.transform = "scale(1)";
+          // FIX (macOS Chromium jitter): clear the CSS transition + transform the moment they
+          // complete so the drift loop's setAttribute(cx/cy) writes don't conflict with an
+          // active CSS transition on the same element on macOS Blink's Metal compositor.
+          n.el.addEventListener('transitionend', () => {
+            n.el.style.transition = "";
+            n.el.style.transform = "";
+          }, { once: true });
+        }, t + i * C.bootNodeStaggerMs);
+      });
+      t += C.bootLayerStaggerMs;
+    }
+    t += C.bootNodeFadeMs + C.bootPhaseGapMs;   // wait for last nodes to finish, THEN pause
+
+    // ── PHASE C: edges weave in SYMMETRICALLY — both ends → center ───────────
+    // Edge groups are keyed by target layer (1..last). Each group is "round" steps
+    // from the nearest outer end; the left and right groups at the same round fire
+    // TOGETHER, drawing inward, so the two halves mirror each other and the circuit
+    // closes at the core last. Rounds: 0 = outermost pair … last = innermost (center).
+    const lastLayer = layers.length - 1;
+    const numRounds = Math.ceil(lastLayer / 2);   // 4 groups → 2 rounds for [4,_,_,_,5]
+    // cubic ease-out matching the CSS EASE feel — shared by both halves so they're
+    // identical curves.
+    const easeWeave = (p) => 1 - Math.pow(1 - p, 3);
+    // Group edges by convergence round. Both the near and far group at the same round
+    // draw together off ONE shared clock, so — regardless of edge length — every edge
+    // advances in lockstep and meets the center at the same instant.
+    const roundEdges = Array.from({ length: numRounds }, () => []);
+    for (let li = 1; li <= lastLayer; li++) {
+      const rightHalf = li > centerLayer;
+      const round = rightHalf ? (lastLayer - li) : (li - 1);   // distance from own outer end
+      edges.forEach(e => { if (nodes[e.toIdx].layer === li && e.el) roundEdges[round].push(e); });
+    }
+    // MOBILE-ONLY: freeze node drift for the duration of the weave so the long bottom
+    // edges draw in lockstep with the top half and don't pop at handoff. Cleared in
+    // PHASE C.5 once every dasharray is removed. Desktop leaves this false → unchanged.
+    if (isMobile) {
+      setTimeout(() => { if (!bootDone) bootWeavingMobile = true; }, t);
+    }
+    roundEdges.forEach((group, round) => {
+      setTimeout(() => {
+        if (bootDone) return;
+        // Edges weave in a LIGHT-PURPLE stroke with a heavier width so the forming is
+        // clearly visible and engaging — brightness kept moderate (bootWeaveOpacity).
+        // The flush+fade then settles color, width and opacity down to idle rest,
+        // where breathing takes over seamlessly.
+        group.forEach(e => {
+          e.el.style.transition = "none";
+          e.el.style.stroke = C.bootWeaveColor;
+          e.el.style.strokeWidth = String(C.bootWeaveWidth);
+        });
+        let start = null;
+        function weave(now) {
+          if (bootDone) return;
+          if (start === null) start = now;
+          const p = Math.min(1, (now - start) / C.bootEdgeDrawMs);
+          const e1 = easeWeave(p);
+          // opacity ramps over the first ~40% of the draw up to the weave crest
+          const ramp = Math.min(1, p / 0.4);
+          const op = (C.bootWeaveOpacity * ramp).toFixed(3);
+          group.forEach(e => {
+            // Drift is moving the node endpoints every frame, so the line's ACTUAL length
+            // changes. The dash reveal must track that live length — otherwise the dash
+            // (sized once from the base length) drifts out of sync with the endpoints and
+            // the stroke detaches/overshoots (very visible on the long, steep edges of the
+            // tall mobile net). Recompute length + signed offset from the CURRENT node
+            // positions each frame so the reveal stays glued to the line.
+            const a = nodes[e.fromIdx], b = nodes[e.toIdx];
+            const liveLen = Math.hypot(b.cx - a.cx, b.cy - a.cy);
+            // Positive offset only (Safari-safe). Far-half lines are drawn reversed
+            // (head = outer node), so this still reveals them from the outer end inward.
+            e.el.style.strokeDasharray = liveLen.toFixed(2);
+            e.el.style.strokeDashoffset = (liveLen * (1 - e1)).toFixed(2);
+            e.el.style.opacity = op;
+          });
+          if (p < 1) requestAnimationFrame(weave);
+        }
+        requestAnimationFrame(weave);
+      }, t + round * C.bootEdgeStaggerMs);
+    });
+    // weave end: all rounds have drawn bright + full opacity
+    t += (numRounds - 1) * C.bootEdgeStaggerMs + C.bootEdgeDrawMs;
+
+    // ── PHASE C.5: hold the whole net at the light-purple weave crest briefly (one
+    // full swell across the net), then fade color, width and opacity down to idle rest
+    // so breathing picks up seamlessly.
+    // FIX (macOS Chromium jitter): the original CSS transition (stroke/stroke-width/opacity)
+    // conflicted with the drift loop's per-frame setAttribute(x1/y1/x2/y2) writes on the
+    // same <line> elements — macOS Blink's Metal compositor exposes this as visible jitter
+    // (edges and nodes flicker in/out). Replaced with a pure rAF-driven fade so both
+    // opacity writes and geometry writes are on the same main thread. Safari/iOS are
+    // unaffected (Core Animation serialises them) and Windows Blink is unaffected (ANGLE
+    // backend tolerates the conflict). The visual result is identical.
+    setTimeout(() => {
+      if (bootDone || !MODEL) return;
+      // Weave is done — release the mobile node freeze so ambient drift resumes. Drift is a
+      // continuous sine/cosine around each node's BASE position, and nodes were held AT base
+      // during the freeze, so resuming starts from swell≈0 with no positional jump.
+      bootWeavingMobile = false;
+      // Switch stroke color + width to their idle values immediately (hidden under the
+      // opacity fade that follows). No CSS transition — all opacity changes driven via rAF.
+      MODEL.edges.forEach(e => {
+        if (!e.el) return;
+        e.el.style.strokeDasharray = "";
+        e.el.style.strokeDashoffset = "";
+        e.el.style.transition = "none";
+        e.el.style.stroke = "var(--edge-vis)";
+        e.el.style.strokeWidth = (0.6 + e.baseOpacity * 1.0).toFixed(2);
+      });
+      // rAF-driven opacity fade: weave crest (bootWeaveOpacity) → per-edge rest opacity.
+      // Runs on the same thread as the drift loop's geometry writes → no compositor conflict.
+      const fadeStart = performance.now();
+      const fadeDur = C.bootFlushFadeMs;
+      const startOp = C.bootWeaveOpacity;
+      function bootFlushFade(now) {
+        if (bootDone || !MODEL) return;   // boot was skipped or model rebuilt
+        const p = Math.min(1, (now - fadeStart) / fadeDur);
+        const ease = 1 - Math.pow(1 - p, 3);   // cubic ease-out — matches original EASE feel
+        MODEL.edges.forEach(e => {
+          if (!e.el) return;
+          e.el.style.opacity = (startOp + (e.baseOpacity - startOp) * ease).toFixed(3);
+        });
+        if (p < 1) {
+          requestAnimationFrame(bootFlushFade);
+        } else {
+          // Fade complete: clear all inline overrides so drift/reset own these properties.
+          MODEL.edges.forEach(e => {
+            if (!e.el) return;
+            e.el.style.transition = "";
+            e.el.style.stroke = "";
+            e.el.style.strokeWidth = "";
+            e.el.style.opacity = String(e.baseOpacity);
+          });
+        }
+      }
+      requestAnimationFrame(bootFlushFade);
+    }, t + C.bootFlushHoldMs);
+    // advance past the hold + fade, then the usual phase gap before breathing
+    t += C.bootFlushHoldMs + C.bootFlushFadeMs + C.bootPhaseGapMs;
+
+    // ── PHASE D: breathing switches on (its own beat) ────────────────────────
+    setTimeout(() => { if (!bootDone) bootBreathReady = true; }, t);
+
+    // ── PHASE E: nav buttons rise up, one after another ──────────────────────
+    btns.forEach((b, i) => {
+      setTimeout(() => {
+        if (bootDone) return;
+        b.style.transition = `opacity ${C.bootBtnRiseMs}ms ${EASE}, transform ${C.bootBtnRiseMs}ms ${EASE}`;
+        b.style.opacity = "";
+        b.style.transform = "translateY(0)";
+        b.addEventListener("transitionend", () => { b.style.transform = ""; b.style.transition = ""; }, { once: true });
+      }, t + i * C.bootBtnStaggerMs);
+    });
+    t += btns.length * C.bootBtnStaggerMs + C.bootPhaseGapMs;
+
+    // ── PHASE F: guide line types itself ─────────────────────────────────────
+    if (guide) {
+      guideFull.split("").forEach((ch, i) => {
+        setTimeout(() => { if (!bootDone) guide.textContent += ch; }, t + i * C.guideTypeMs);
+      });
+    }
+
+    // ── cleanup: clear inline node/edge styles so drift/reset behave normally ─
+    const total = t + guideFull.length * C.guideTypeMs + 60;
+    setTimeout(() => {
+      if (bootDone) return;
+      nodes.forEach(n => { if (n.el) { n.el.style.transition = ""; n.el.style.transform = ""; } });
+      edges.forEach(e => { if (e.el) { e.el.style.strokeDasharray = ""; e.el.style.strokeDashoffset = ""; e.el.style.transition = ""; e.el.style.opacity = e.baseOpacity; e.el.style.stroke = ""; e.el.style.strokeWidth = ""; } });
+      bootDone = true;
+      scheduleIdlePulse();
+    }, total);
+  }
+
+  function skipBoot() {
+    if (bootDone) return;
+    bootDone = true;
+    bootBreathReady = true;
+    bootWeavingMobile = false;   // release the mobile weave freeze so drift resumes
+    scheduleIdlePulse();
+    if (MODEL) {
+      MODEL.nodes.forEach(n => { if (n.el) { n.el.style.transition = ""; n.el.style.transform = ""; n.el.style.opacity = (n.type === "input" || n.type === "output") ? "1" : "0.8"; } });
+      MODEL.edges.forEach(e => { if (e.el) { e.el.style.transition = ""; e.el.style.strokeDasharray = ""; e.el.style.strokeDashoffset = ""; e.el.style.opacity = e.baseOpacity; e.el.style.stroke = ""; e.el.style.strokeWidth = ""; } });
+    }
+    document.querySelectorAll(".nn-btn").forEach(b => { b.style.transition = ""; b.style.transform = ""; b.style.opacity = ""; });
+    const guide = document.querySelector(".nn-guide");
+    if (guide && !guide.textContent.trim()) setGuideText();
+  }
+
+  // ── Pointer field interaction ──────────────────────────────────────────────
+  // Nodes within a radius of the cursor are gently pushed AWAY from it (and their
+  // edges follow, since edges are redrawn from node positions every drift frame).
+  // Reads like an interactive particle field. Active at ALL times — including while
+  // a result is showing. Reduced-motion + mobile off.
+  let pointerX = null, pointerY = null;   // cursor in SVG viewBox coords (null = off-canvas)
+  const FIELD_RADIUS = 130;               // px (viewBox units) of influence
+  const FIELD_PUSH = 26;                  // max displacement at the cursor center
+
+  // Active at ALL times (idle AND while a result is showing) — only off for
+  // reduced-motion and mobile (no pointer parallax there).
+  function fieldActive() {
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    return !reduced && !isMobile;
+  }
+
+  // Convert a client (px) point to the SVG's viewBox coordinate space.
+  function clientToViewBox(svg, clientX, clientY) {
+    const r = svg.getBoundingClientRect();
+    if (!r.width || !r.height || !MODEL) return null;
+    const vbX = (clientX - r.left) / r.width * MODEL.W;
+    const vbY = (clientY - r.top) / r.height * MODEL.H;
+    return { x: vbX, y: vbY };
+  }
+
+  function wireField() {
+    const root = document.querySelector(".nn-root");
+    const svg = document.getElementById("nn");
+    if (!root || !svg) return;
+    root.addEventListener("pointermove", (e) => {
+      if (!fieldActive()) { pointerX = pointerY = null; return; }
+      const p = clientToViewBox(svg, e.clientX, e.clientY);
+      if (p) { pointerX = p.x; pointerY = p.y; }
+    });
+    root.addEventListener("pointerleave", () => { pointerX = pointerY = null; });
+  }
+
+  // ── Guide line copy — differs by device (desktop = click/double-click; mobile =
+  // tap input → tap result). Set BEFORE boot so the typewriter types the right copy. ──
+  const GUIDE_DESKTOP = "click a page for magic  ·  double-click to miss it";
+  const GUIDE_MOBILE  = "tap a page for magic  ·  double tap to miss it";
+  function setGuideText() {
+    const guide = document.querySelector(".nn-guide");
+    if (guide) guide.textContent = isMobile ? GUIDE_MOBILE : GUIDE_DESKTOP;
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────────
+  setGuideText();
+  renderNetwork();
+  wireButtons();
+  wireMobile();
+  wireField();
+  runBoot();
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearTimeout(idleTimer);
+      if (driftRaf) { cancelAnimationFrame(driftRaf); driftRaf = null; }
+    } else {
+      scheduleIdlePulse();
+      startDrift();
+    }
+  });
+</script>
+
+<style>
+  /* ── CSS tokens local to the network (derived from global.css custom props) ── */
+  .nn-root {
+    --edge-vis:          #5e72a2;   /* cooler + brighter — reads clearly on pitch-black */
+    --node-io-fill:      #1e2a3a;   /* input/output fill */
+    --node-io-border:    #8497c0;   /* input/output border — bright, legible */
+    --node-h-fill:       #18212e;   /* hidden fill */
+    --node-h-border:     #5a6e92;   /* hidden border — visible at rest */
+    --node-active-fill:  var(--accent-tint);
+
+    /* The NET is a fixed-size, screen-centered layer (see .nn-center). EVERYTHING
+       else — nav, vectors, tiles — is a FIXED overlay. Layout across the screen:
+         [nav @ edge] [input-vec near nav] [ NET fills the middle ] [output-vec near tiles] [tiles @ edge]
+       The vectors are anchored near the nav/tiles (slight gap), so growing the net
+       only eats the empty middle — the net never collides with them. */
+    /* The net is screen-CENTERED and grows symmetrically, so both vectors share ONE
+       inset — set just past the longest word on either side. After the "papers" rename,
+       the longest words are now "projects" / "/projects" / "/dev/null" (~8–9 chars, ~6rem),
+       down from "publications" (12). So both the inset and reservation tighten and the
+       net widens evenly on both sides. */
+    --nn-vec-edge: clamp(8.5rem, 9vw, 9rem);        /* both vectors — clears the longest word ("projects"/"/projects" ~6rem) + a clear gap */
+    /* Net width = viewport minus the side reservation. NOTE: on wide screens the net is
+       limited by .nn-center's max-height (the tall diamond), NOT this reservation — so this
+       value only governs net width on narrower screens (≲1500px). 20rem keeps the vectors
+       clear without crowding. */
+    --nn-net-w: min(96rem, calc(100vw - 20rem));    /* net width — fills the middle */
+    --nn-net-half: calc(var(--nn-net-w) / 2);
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+  }
+
+  /* ── Nav — typographic, FIXED overlay on the far left (outside the grid) ──────── */
+  .nn-left {
+    position: fixed;
+    left: 0.4rem;
+    top: 50%;
+    transform: translateY(-50%) translateZ(0);
+    will-change: transform;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--sp-6);
+    z-index: 5;
+  }
+
+  /* Type + space + one precise motion. No border, no background, no min-width. */
+  .nn-btn {
+    position: relative;
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    width: max-content;
+    background: none;
+    border: none;
+    padding: 0;
+    will-change: transform;
+    transform: translateZ(0);
+    transition: color var(--dur) var(--ease), opacity var(--dur) var(--ease);
+  }
+  /* Accent rule draws OUTWARD to the RIGHT of the label (absolute, so the label
+     itself never moves and can sit flush against the screen's left edge). */
+  .nn-btn::before {
+    content: "";
+    position: absolute;
+    left: calc(100% + 0.5rem);
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 1.5px;
+    background: var(--accent);
+    transition: width var(--dur) var(--ease);
+  }
+  .nn-btn:hover,
+  .nn-btn:focus-visible {
+    color: var(--text);
+    outline: none;
+  }
+  .nn-btn:hover::before,
+  .nn-btn:focus-visible::before {
+    width: 1.1rem;
+  }
+  .nn-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    border-radius: 2px;
+  }
+
+  /* Selected (clicked) — label → accent-bright, the accent rule stays drawn. */
+  .nn-btn-selected {
+    color: var(--accent-bright);
+  }
+  .nn-btn-selected::before {
+    width: 1.1rem;
+  }
+  /* Others dim while one is selected. */
+  .nn-btn-dimmed {
+    opacity: 0.4;
+  }
+
+  /* ── Input / output vector columns — slim brackets flanking the net ──────────── */
+  .nn-vec-col {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-2);
+    width: 22px;   /* thinned 26→22px (slimmer column, more room for the wider net). REVERT: 26px */
+    z-index: 4;
+    /* Hidden by default (no layout shift — it's fixed/overlaid) */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+  }
+  .nn-vec-col.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  /* Vectors anchored near the nav (left) / tiles (right), a slight gap past them.
+     The big net fills the middle between them. */
+  #nn-input-vec {
+    left: var(--nn-vec-edge);
+  }
+  /* Output vector sits between the net (on its left) and the winner READOUT box (on its
+     right). It needs clearance from BOTH: too far right and it touches the box, too far
+     left and it crowds the net. +0.75rem past the shared inset is the balance point.
+     The net is height-capped, so this vector's position does not change the net size. */
+  #nn-output-vec {
+    right: calc(var(--nn-vec-edge) + 0.75rem);
+  }
+
+  .nn-vec-label {
+    font-family: var(--font-mono);
+    /* Intentionally below the --t-2xs (11px) floor: this label is what set that floor, and
+       it's shrunk here to narrow the title width (the longest word, "probabilities", drove
+       the column's visible footprint). Tighter letter-spacing narrows it further.
+       REVERT: font-size → var(--t-2xs), letter-spacing → 0.06em. */
+    font-size: 0.625rem;       /* 10px (was 11px) */
+    color: var(--text-faint);
+    letter-spacing: 0.03em;    /* was 0.06em — tighter → narrower title */
+    text-transform: uppercase;
+    text-align: center;
+    transition: color 0.4s ease;
+  }
+
+  /* bracket + values — height = the values' natural height (content-sized), so the
+     bracket wraps the numbers snugly with no floating gaps. */
+  .nn-vec-body {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;   /* brackets stretch to exactly the values' height */
+    gap: var(--sp-1);
+  }
+
+  /* SVG brackets — thin strips that STRETCH to the values' full height (via the
+     parent's align-items:stretch). No explicit height → no collapse. */
+  .nn-bracket {
+    width: 3px;   /* T3b: thinned 4→3px */
+    flex-shrink: 0;
+    color: var(--text-dim);
+    align-self: stretch;
+    height: auto;
+    display: block;
+    overflow: visible;
+    transition: color 0.4s ease;
+  }
+
+  /* Values column — tight, evenly spaced rows; the column is as tall as the rows
+     need (no fixed height), so the bracket hugs them. */
+  .nn-vec-values {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 0.32rem;   /* T3b: tightened 0.4→0.32rem */
+    padding: 0.28rem 0;   /* T3b: tightened 0.35→0.28rem — small breathing room inside the bracket */
+    font-variant-numeric: tabular-nums;
+  }
+  /* Individual value rows — sized to sit cleanly in the slim column. */
+  .nn-vec-row {
+    font-family: var(--font-mono);
+    font-size: var(--t-2xs);   /* 11px — keeps the vector thin */
+    line-height: 1.1;
+    color: var(--text-dim);
+    text-align: center;
+    white-space: nowrap;
+  }
+  .nn-vec-winner {
+    font-weight: 600;
+  }
+
+  /* ── Center SVG — fixed-size, screen-centered centerpiece (never shrinks) ────── */
+  .nn-center {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    /* viewBox is 980×720 (ratio ~1.36). Size the box EXPLICITLY to the largest area that
+       fits both the side reservation (--nn-net-w) and 98vh of height — instead of
+       `aspect-ratio` + `max-height`. Safari/WebKit applies max-height BEFORE aspect-ratio,
+       collapsing the height to ~0, which shrank the net and left big empty margins. The
+       min()/calc()/vh form below resolves identically in every browser (the SVG's own
+       preserveAspectRatio absorbs any sub-pixel rounding). */
+    width: min(var(--nn-net-w), calc(98vh * 980 / 720));
+    height: min(calc(var(--nn-net-w) * 720 / 980), 98vh);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+  }
+
+  .neural-net {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    /* SVG scales to fill container while preserving aspect ratio */
+  }
+
+  /* ── Right panel — FIXED overlay on the far right (mirror of the nav) ────────── */
+  .nn-right {
+    position: fixed;
+    right: 0.2rem;          /* mirror of .nn-left's left: 0.2rem (symmetry) */
+    top: 50%;
+    transform: translateY(-50%) translateZ(0);
+    will-change: transform;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.5rem;
+    align-items: center;    /* mirror the nav; rows center on their own content */
+    z-index: 5;
+  }
+
+  /* Output readout — mirrors the INPUT nav buttons (.nn-btn): each row is a path word
+     in the same mono type. The WINNER gets a bordered box (the clicked-input outline)
+     plus its % and "go →"; runners-up are word-only and reveal sequentially after it. */
+  .nn-output-tile {
+    display: flex;
+    flex-direction: column;     /* path, then (winner only) prob + go beneath it */
+    align-items: flex-end;      /* runners-up right-aligned, mirroring the nav's left edge */
+    justify-content: center;
+    gap: 0.05rem;
+    padding: 0.22rem 0.45rem;   /* room for the winner's border without shifting the word */
+    border: 1px solid transparent;   /* reserved so the winner's border adds no layout shift */
+    border-radius: 4px;
+    cursor: default;
+    white-space: nowrap;
+    text-align: right;
+    opacity: 0;            /* fully hidden until the network runs */
+    pointer-events: none;  /* not interactive at rest */
+    transition: opacity 0.4s ease, color 0.4s ease, border-color 0.3s ease;
+  }
+  /* Path word — same mono as the input buttons (.nn-btn), a touch smaller for a refined readout. */
+  .nn-out-path {
+    font-family: var(--font-mono);
+    font-size: 0.92rem;
+    color: var(--text-faint);
+    letter-spacing: 0.04em;      /* match .nn-btn */
+    transition: color 0.4s ease;
+    white-space: nowrap;
+  }
+  /* Prob shows for the WINNER only (hidden on runners-up). */
+  .nn-out-prob {
+    font-family: var(--font-mono);
+    font-size: var(--t-xs);
+    color: var(--text-ghost);
+    font-variant-numeric: tabular-nums;
+    transition: color 0.4s ease, opacity 0.4s ease;
+    opacity: 0;
+    display: none;               /* revealed only under the winner */
+  }
+
+  /* "go →" CTA — light-purple (--accent-bright) so it reads as THE action, distinct
+     from the teal winner word: the user clicks this to navigate (no auto-redirect). */
+  .nn-go {
+    font-family: var(--font-mono);
+    font-size: var(--t-sm);          /* clearly larger than the prob, still elegant */
+    font-weight: 700;
+    color: var(--accent);            /* deeper periwinkle — reads as purple, not white */
+    letter-spacing: 0.06em;
+    opacity: 0;
+    transform: translateY(-3px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  /* When forward pass is active, rows become slightly visible */
+  .nn-tile-active {
+    opacity: 0.6;
+    pointer-events: auto;
+  }
+  .nn-tile-active .nn-out-prob {
+    opacity: 1;
+  }
+
+  /* Winner — the star of the readout: a bordered box echoing the clicked-input outline
+     (teal here), with the path word, its %, and "go →" inside. */
+  .nn-tile-winner {
+    opacity: 1;
+    cursor: pointer;
+    align-items: center;                   /* word + prob + go centered inside the box */
+    border-color: var(--hover);            /* the box — mirrors the clicked-input outline */
+    box-shadow: 0 0 12px rgba(95, 211, 196, 0.15);
+    animation: nn-tile-pop 320ms var(--ease-spring);
+  }
+  @keyframes nn-tile-pop {
+    0%   { transform: scale(0.96); }
+    55%  { transform: scale(1.03); }
+    100% { transform: scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nn-tile-winner { animation: none; }
+  }
+  /* Winner = teal (the chosen answer) with a soft teal bloom on the word. */
+  .nn-tile-winner .nn-out-path {
+    color: var(--hover);
+    text-shadow: 0 0 14px rgba(95, 211, 196, 0.55);
+  }
+  .nn-tile-winner .nn-out-prob {
+    color: var(--hover);
+    font-weight: 600;
+    opacity: 1;
+    display: block;                        /* prob shown for the winner only */
+  }
+  .nn-tile-winner .nn-go {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+    font-size: var(--t-base);
+    color: var(--accent-bright);
+    /* Breathing purple glow — reads as "live, click me" without shouting. */
+    animation: nn-go-pulse 1.8s ease-in-out 0.2s infinite;
+  }
+  /* Arrow drifts right and back — a quiet "this way" cue, independent of the glow. */
+  .nn-tile-winner .nn-go-arrow {
+    display: inline-block;
+    animation: nn-go-arrow 1.8s ease-in-out 0.2s infinite;
+  }
+  @keyframes nn-go-pulse {
+    0%, 100% { text-shadow: 0 0 0 rgba(168, 177, 255, 0); }
+    50%      { text-shadow: 0 0 12px rgba(168, 177, 255, 0.95); }
+  }
+  @keyframes nn-go-arrow {
+    0%, 100% { transform: translateX(0); }
+    50%      { transform: translateX(3px); }
+  }
+  /* Reduced motion: keep the purple bright + static (no pulse, no drift). */
+  @media (prefers-reduced-motion: reduce) {
+    .nn-tile-winner .nn-go {
+      animation: none;
+      text-shadow: 0 0 8px rgba(168, 177, 255, 0.6);
+    }
+    .nn-tile-winner .nn-go-arrow { animation: none; }
+  }
+
+  /* Wrong/amber state */
+  .nn-tile-wrong {
+    opacity: 1;
+  }
+  .nn-tile-wrong .nn-out-path { color: var(--amber); text-shadow: 0 0 12px rgba(227,179,65,0.35); }
+  .nn-tile-wrong .nn-out-prob { color: var(--amber); opacity: 1; }
+
+  /* Revealed — non-winner rows are WORD-ONLY (no %, no border), fading in dim iris one
+     by one after the winner settles (the network's firing hue, quieter than the winner). */
+  .nn-tile-revealed {
+    opacity: 1;
+  }
+  .nn-tile-revealed .nn-out-path {
+    color: var(--accent);
+    opacity: 0.65;
+  }
+  /* (runners-up keep .nn-out-prob display:none — the raw numbers live in the vector) */
+
+  /* /dev/null row — extra dim once active (the quiet joke). */
+  .nn-devnull.nn-tile-active {
+    opacity: 0.4;
+  }
+  .nn-devnull .nn-out-path,
+  .nn-devnull .nn-out-prob { color: var(--text-ghost); }
+
+  /* ── Guiding text ─────────────────────────────────────────────────────────────── */
+  .nn-guide {
+    position: fixed;
+    bottom: 1.2rem;   /* moved DOWN (was 2rem) — desktop only; mobile keeps its 0.8rem override
+                         below. REVERT: change back to 2rem. */
+    left: 50%;
+    transform: translateX(-50%) translateY(0);
+    font-size: 0.85rem;
+    /* Legible caption tone with a light purple tint to tie it to the boot weave —
+       comfortably readable, but cool/soft so it doesn't compete with the network. */
+    color: color-mix(in srgb, var(--text-dim) 70%, #b9a8ff 30%);
+    pointer-events: none;
+    z-index: 10;
+    /* Slides+fades out while the net works (.nn-guide-hidden), back in at idle. */
+    transition: opacity 0.45s var(--ease), transform 0.45s var(--ease);
+    white-space: nowrap;
+    letter-spacing: 0.05em;
+    opacity: 1;
+  }
+  /* Hidden while the net is working: fade + slide down out of view. */
+  .nn-guide-hidden {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nn-guide { transition: opacity 0.2s ease; }
+    .nn-guide-hidden { transform: translateX(-50%) translateY(0); }
+  }
+
+  /* ── Loss + argmax caption — top-right, stacked cleanly BELOW the socials ────── */
+  .nn-caption {
+    position: fixed;
+    /* socials sit at top:--edge-pad with ~1.65rem glyph height; clear them with a gap */
+    top: calc(var(--edge-pad) + 2.6rem);
+    /* Share the socials' right edge. The mono caption has a small character
+       side-bearing (gap between glyph and cell edge), so its VISIBLE right edge
+       reads a hair left of the solid icon edge. --nn-cap-optical pulls the text
+       out by that side-bearing so the two right edges read as one frame line.
+       Tune live: set --nn-cap-optical until the caption's right edge meets the
+       LinkedIn icon's right edge exactly. 0 = flush to --edge-pad. */
+    --nn-cap-optical: 1.2rem;
+    right: calc(var(--edge-pad) - var(--nn-cap-optical));
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.15rem;
+    font-family: var(--font-mono);
+    font-size: var(--t-xs);              /* 12px */
+    color: var(--text-faint);
+    text-align: right;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .nn-caption.visible { opacity: 1; }
+  .nn-cap-loss   { color: var(--text-faint); }   /* dim, secondary */
+  .nn-cap-argmax { color: var(--hover); }        /* teal — matches the winner */
+  /* amber override when backprop/wrong is showing */
+  .nn-caption.is-wrong .nn-cap-loss   { color: var(--amber); }
+  .nn-caption.is-wrong .nn-cap-argmax { color: var(--amber); }
+
+  /* ── Mobile readout pill — single bottom result (≤767px only) ────────────────────
+     "→ projects · 84%" — the winner, tappable to navigate. Hidden at rest; shown after
+     a tap-pass settles. */
+  .nn-mobile-readout {
+    display: none;   /* shown only on mobile, and only after a pass settles */
+    position: fixed;
+    left: 50%;
+    bottom: 1.5rem;  /* moved DOWN (was 3rem) → sits lower, clear below the (now wider/taller-
+                        feeling) net. REVERT: change back to 3rem. */
+    transform: translateX(-50%) translateY(6px);
+    z-index: 15;
+    padding: 0.4rem 0.9rem;
+    font-size: var(--t-sm);
+    color: var(--hover);
+    background: rgba(10, 12, 17, 0.82);
+    border: 1px solid var(--hover);
+    border-radius: 999px;
+    box-shadow: 0 0 12px rgba(95, 211, 196, 0.18);
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s var(--ease), transform 0.35s var(--ease);
+  }
+  .nn-mobile-readout.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+    pointer-events: auto;
+    cursor: pointer;
+  }
+  /* Light-purple "tap to open" suffix — distinct from the teal result, gently pulsing
+     so the user knows the pill is the thing to tap (no auto-redirect). */
+  .nn-readout-go {
+    color: var(--accent-bright);
+    font-size: var(--t-base);
+    font-weight: 700;
+    margin-left: 0.45rem;
+    padding-left: 0.45rem;
+    border-left: 1px solid rgba(168, 177, 255, 0.3);
+    animation: nn-go-pulse 1.8s ease-in-out 0.2s infinite;
+  }
+  /* Arrow nudge — mirrors the desktop winner's "go →" so both readouts match. */
+  .nn-readout-go .nn-go-arrow {
+    display: inline-block;
+    animation: nn-go-arrow 1.8s ease-in-out 0.2s infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nn-readout-go {
+      animation: none;
+      text-shadow: 0 0 8px rgba(168, 177, 255, 0.6);
+    }
+    .nn-readout-go .nn-go-arrow { animation: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nn-mobile-readout { transition: opacity 0.2s ease; }
+    .nn-mobile-readout.visible { transform: translateX(-50%) translateY(0); }
+  }
+
+  /* ── Mobile (≤767px): vertical net ───────────────────────────────────────────────
+     The SVG now builds PORTRAIT (420×760, layers top→bottom) in buildModel, so it is
+     kept FIXED + screen-centered like desktop — only its size token + aspect-ratio
+     change. The desktop side rails (nav spine, vector columns, output tiles) are all
+     hidden; mobile uses an input row at the top + a single readout pill at the bottom. */
+  @media (max-width: 767px) {
+    /* No desktop side reservation — the portrait net fills the phone width. */
+    .nn-root { --nn-net-w: 100vw; }
+
+    /* Hide desktop-only chrome: vector columns + the per-section output readout. */
+    .nn-vec-col { display: none; }
+    .nn-right { display: none; }
+
+    /* Input nav = a labeled row across the TOP, below the name/socials row. Sits
+       clearly ABOVE the net's first layer (a gap, not flush) — see .nn-center top. */
+    .nn-left {
+      position: fixed;
+      left: 50%;
+      top: calc(var(--edge-pad) + 2.4rem);   /* clears the top-left name + top-right socials */
+      transform: translateX(-50%);
+      flex-direction: row;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 0.4rem;
+      width: 100%;
+      padding: 0 0.5rem;
+      z-index: 15;
+    }
+    .nn-btn {
+      /* label centered; ≥44px tap target via padding (node + label + padding).
+         Bigger + brighter than desktop's rail so it clearly reads as a tappable nav
+         item on a phone (#2) — not a dim caption. */
+      font-size: var(--t-base);          /* 16px (was 14px) */
+      color: var(--text-dim);            /* brighter than --text-faint */
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      padding: 0.6rem 0.55rem;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    /* the accent rule (drawn to the right of the label) reads odd in a row — hide it */
+    .nn-btn::before { display: none; }
+
+    /* Net: full phone width so WIDTH is the constraining dimension — the 600-unit viewBox
+       maps exactly to 100vw and the middle layer reaches the screen edges (#3), no side
+       letterbox. aspect-ratio 600/760 → height ≈ 1.27× width. Centered a touch ABOVE
+       middle (top: 49%) so the bottom layer ends well clear of the readout pill, leaving
+       the empty bottom band for the pill (#4). */
+    .nn-center {
+      /* Explicit sizing (same Safari aspect-ratio+max-height bug as desktop): the largest
+         600×760 box that fits min(100vw, 34rem) wide and 74vh tall. No aspect-ratio.
+         Raised 62vh→74vh so WIDTH becomes the binding constraint and the net fills the phone
+         width (at 62vh height bound first, leaving side gaps → net read small).
+         REVERT: change both 74vh back to 62vh. */
+      width: min(100vw, 34rem, calc(74vh * 600 / 760));
+      height: min(calc(min(100vw, 34rem) * 760 / 600), 74vh);
+      top: 52%;            /* nudged down → more breathing gap below the input row (#3) */
+    }
+
+    /* Readout pill is the mobile output — winner pinned LOW in the empty bottom band,
+       well below the net's bottom layer (#4). */
+    .nn-mobile-readout { display: block; }
+
+    /* Guide line: keep it on-screen (#2). The desktop copy is one long line that
+       overflows a phone — allow it to wrap to 2 centered lines within the viewport. */
+    .nn-guide {
+      font-size: var(--t-xs);
+      bottom: 0.8rem;
+      white-space: normal;
+      text-align: center;
+      max-width: min(92vw, 30rem);
+      line-height: 1.4;
+    }
+  }
+
+  /* Narrow phones (≤26rem/~416px): trim the input labels just enough that all four fit
+     on one row without colliding (§3d) — but keep them legibly large + bright (#2),
+     not shrunk to a caption. Floor at --t-sm (14px). */
+  @media (max-width: 26rem) {
+    .nn-btn { font-size: var(--t-sm); padding: 0.6rem 0.35rem; }
+    .nn-left { gap: 0.2rem; }
+  }
+</style>

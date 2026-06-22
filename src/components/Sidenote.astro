@@ -1,0 +1,140 @@
+---
+// src/components/Sidenote.astro — Tufte-style margin notes for MDX posts (CLAUDE.md §11 tracker).
+// ≥1200px: float-right into the margin, clear of the minimap.
+// <1200px: numbered superscript that expands inline on tap.
+// CSS counter numbering; no JS needed for the number itself.
+// Usage in MDX: <Sidenote>This is the margin note text.</Sidenote>
+---
+
+<span class="sn-wrap" data-sidenote>
+  <!-- superscript toggle (always visible; on wide screens it's just the number, non-interactive) -->
+  <button
+    type="button"
+    class="sn-marker"
+    aria-expanded="false"
+    aria-label="Toggle sidenote"
+  ></button>
+  <!-- note body: floated right on wide screens, inline-expanded on narrow -->
+  <span class="sn-body" role="note">
+    <slot />
+  </span>
+</span>
+
+<style>
+  /* counter lives on .prose (defined in Post.astro); each .sn-wrap increments it */
+  .sn-wrap {
+    counter-increment: sidenote;
+    /* must NOT be position:relative — that would confine the float */
+    display: inline;
+  }
+
+  /* ── superscript marker ── */
+  .sn-marker {
+    display: inline;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 0.72em;
+    vertical-align: super;
+    line-height: 1;
+  }
+  .sn-marker::before {
+    content: counter(sidenote);
+  }
+
+  /* ── narrow / tablet: inline expansion ── */
+  .sn-body {
+    display: none;
+    /* when open, becomes a block-level aside below the marker */
+  }
+  .sn-body.open {
+    display: block;
+    margin: 0.6rem 0 0.6rem 0;
+    padding: 0.5rem 0.75rem;
+    border-left: 2px solid var(--accent-dark);
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+    color: var(--text-faint);
+    font-size: 0.85rem;
+    line-height: 1.55;
+  }
+  /* counter label before inline note */
+  .sn-body.open::before {
+    content: counter(sidenote) ". ";
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+    color: var(--accent);
+  }
+
+  /* ── wide screens (≥1200px): float into the right margin ── */
+  @media (min-width: 1200px) {
+    .sn-marker {
+      /* just a number, no interaction needed */
+      pointer-events: none;
+      cursor: default;
+    }
+
+    .sn-body {
+      /* float out of flow into the right margin */
+      display: block !important;
+      float: right;
+      clear: right;
+      /* push it beyond the reading column edge; stays left of the minimap rail (~200px wide) */
+      width: 12rem;
+      margin-left: 1.5rem;
+      margin-right: -13.5rem; /* pulls it into the margin */
+      padding: 0;
+      border-left: none;
+      background: none;
+      border-radius: 0;
+      color: var(--text-faint);
+      font-size: 0.78rem;
+      line-height: 1.5;
+    }
+
+    /* counter label before margin note */
+    .sn-body::before {
+      content: counter(sidenote) ". ";
+      font-family: var(--font-mono);
+      font-size: 0.8em;
+      color: var(--accent);
+    }
+  }
+</style>
+
+<script>
+  // Narrow/tablet only: tap to expand. Wide: CSS handles everything.
+  const isWide = () => window.matchMedia("(min-width: 1200px)").matches;
+
+  document.querySelectorAll<HTMLElement>("[data-sidenote]").forEach((wrap) => {
+    const marker = wrap.querySelector<HTMLButtonElement>(".sn-marker")!;
+    const body = wrap.querySelector<HTMLElement>(".sn-body")!;
+
+    const setOpen = (open: boolean) => {
+      body.classList.toggle("open", open);
+      marker.setAttribute("aria-expanded", String(open));
+    };
+
+    marker.addEventListener("click", () => {
+      if (isWide()) return;
+      setOpen(!body.classList.contains("open"));
+    });
+
+    marker.addEventListener("keydown", (e) => {
+      if (isWide()) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        setOpen(!body.classList.contains("open"));
+      } else if (e.key === "Escape") {
+        setOpen(false);
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!wrap.contains(e.target as Node)) setOpen(false);
+    });
+  });
+</script>
