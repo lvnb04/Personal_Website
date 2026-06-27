@@ -11,7 +11,20 @@ import Socials from "@components/Socials.astro";
 <footer class="site-footer">
   <div class="bar container">
     <div class="end left"><Socials size={20} /></div>
-    <span class="quip mono">{site.footerQuip}</span>
+    <span class="quip mono">
+      <svg class="footer-icon" viewBox="0 0 28 28" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="14" cy="14" r="9"
+          stroke="currentColor" stroke-width="2.6" stroke-linecap="round"
+          fill="none"
+          transform="rotate(-15 14 14)"
+          stroke-dasharray="47.1 9.4"
+          stroke-dashoffset="0"
+        />
+        <circle cx="14" cy="14" r="1.8" fill="currentColor" />
+        <circle cx="20.4" cy="7.6" r="2.4" fill="#e0a14e" />
+      </svg>
+      {site.footerQuip}
+    </span>
     <div class="end right">
       <a class="rss mono" href="/rss.xml" aria-label="RSS feed">rss</a>
     </div>
@@ -52,6 +65,16 @@ import Socials from "@components/Socials.astro";
   .quip {
     color: var(--text-dim);
     text-align: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+  }
+  .footer-icon {
+    color: var(--text-dim);
+    flex-shrink: 0;
+    /* Optical baseline alignment */
+    position: relative;
+    top: -0.05em;
   }
   .rss {
     color: var(--text-faint);

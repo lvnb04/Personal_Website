@@ -91,8 +91,31 @@ const sections = JSON.stringify(site.sections);
 <div class="nn-mobile-readout mono" id="nn-mobile-readout" aria-hidden="true"></div>
 
 <!-- Guiding text -->
-<p class="nn-guide mono">
-  click a page for magic &nbsp;·&nbsp; double-click to miss it
+<p class="nn-guide mono" id="nn-guide-el">
+  <span id="nn-guide-left"></span><!--
+  --><span class="nn-guide-icon" id="nn-guide-icon" aria-hidden="true">
+    <svg class="nn-guide-svg" viewBox="0 0 28 28" width="26" height="26" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- outer arc: near-full circle, gap centred at 45° upper-right (matching favicon).
+           rotate(-15) shifts the dasharray gap from its natural 30° position to 45°. -->
+      <circle id="nn-icon-arc" cx="14" cy="14" r="9"
+        stroke="currentColor" stroke-width="2.6" stroke-linecap="round"
+        fill="none"
+        transform="rotate(-15 14 14)"
+        style="opacity:0;stroke-dasharray:0 1000;stroke-dashoffset:0"
+      />
+      <!-- center white dot -->
+      <circle id="nn-icon-dot" cx="14" cy="14" r="1.8"
+        fill="currentColor"
+        style="opacity:0;transform:scale(0);transform-origin:14px 14px"
+      />
+      <!-- gold dot — exactly at 45° upper-right on r=9 circle: (14+9cos45°, 14-9sin45°) -->
+      <circle id="nn-icon-gold" cx="20.4" cy="7.6" r="2.4"
+        fill="#e0a14e"
+        style="opacity:0;transform:scale(0);transform-origin:20.4px 7.6px"
+      />
+    </svg>
+  </span><!--
+  --><span id="nn-guide-right"></span>
 </p>
 
 <script define:vars={{ cfg, sections }}>
@@ -1540,9 +1563,22 @@ const sections = JSON.stringify(site.sections);
     });
     const btns = [...document.querySelectorAll(".nn-btn")];
     btns.forEach(b => { b.style.transition = "none"; b.style.opacity = "0"; b.style.transform = "translateY(12px)"; });
-    const guide = document.querySelector(".nn-guide");
-    let guideFull = "";
-    if (guide) { guideFull = guide.textContent.replace(/\s+/g, " ").trim(); guide.textContent = ""; }
+    const guideLeft  = document.getElementById("nn-guide-left");
+    const guideRight = document.getElementById("nn-guide-right");
+    const guideIcon  = document.getElementById("nn-guide-icon");
+    const iconArc    = document.getElementById("nn-icon-arc");
+    const iconDot    = document.getElementById("nn-icon-dot");
+    const iconGold   = document.getElementById("nn-icon-gold");
+    // Clear text spans + hide icon before boot types them
+    if (guideLeft)  guideLeft.textContent  = "";
+    if (guideRight) guideRight.textContent = "";
+    if (guideIcon)  guideIcon.style.opacity = "0";
+    // Reset SVG circles to pre-animation state (setGuideText may have revealed them)
+    if (iconArc) { iconArc.style.transition = "none"; iconArc.style.opacity = "0"; iconArc.style.strokeDasharray = "0 1000"; iconArc.style.strokeDashoffset = "0"; }
+    if (iconDot) { iconDot.style.transition = "none"; iconDot.style.opacity = "0"; iconDot.style.transform = "scale(0)"; }
+    if (iconGold) { iconGold.style.transition = "none"; iconGold.style.opacity = "0"; iconGold.style.transform = "scale(0)"; }
+    const GUIDE_LEFT  = isMobile ? "tap a page for magic  " : "click a page for magic  ";
+    const GUIDE_RIGHT = isMobile ? "  double tap to miss it" : "  double-click to miss it";
 
     let t = C.bootStartDelayMs;   // PHASE A (name/socials) is handled by CSS delay in index.astro; net waits.
 
@@ -1709,15 +1745,84 @@ const sections = JSON.stringify(site.sections);
     });
     t += btns.length * C.bootBtnStaggerMs + C.bootPhaseGapMs;
 
-    // ── PHASE F: guide line types itself ─────────────────────────────────────
-    if (guide) {
-      guideFull.split("").forEach((ch, i) => {
-        setTimeout(() => { if (!bootDone) guide.textContent += ch; }, t + i * C.guideTypeMs);
+    // ── PHASE F ─────────────────────────────────────────────────────────────
+    if (isMobile) {
+      // Mobile: no icon — type the full text with a plain · separator in one shot
+      const GUIDE_FULL = "tap a page for magic  ·  double tap to miss it";
+      GUIDE_FULL.split("").forEach((ch, i) => {
+        setTimeout(() => { if (!bootDone && guideLeft) guideLeft.textContent += ch; }, t + i * C.guideTypeMs);
       });
+      const total = t + GUIDE_FULL.length * C.guideTypeMs + 60;
+      setTimeout(() => {
+        if (bootDone) return;
+        nodes.forEach(n => { if (n.el) { n.el.style.transition = ""; n.el.style.transform = ""; } });
+        edges.forEach(e => { if (e.el) { e.el.style.strokeDasharray = ""; e.el.style.strokeDashoffset = ""; e.el.style.transition = ""; e.el.style.opacity = e.baseOpacity; e.el.style.stroke = ""; e.el.style.strokeWidth = ""; } });
+        bootDone = true;
+        scheduleIdlePulse();
+      }, total);
+      return;   // ← skip the desktop icon animation below
     }
 
-    // ── cleanup: clear inline node/edge styles so drift/reset behave normally ─
-    const total = t + guideFull.length * C.guideTypeMs + 60;
+    // Desktop: type left half, then animate icon 3-beat, right half already typed
+    GUIDE_LEFT.split("").forEach((ch, i) => {
+      setTimeout(() => { if (!bootDone && guideLeft) guideLeft.textContent += ch; }, t + i * C.guideTypeMs);
+    });
+    const LEFT_MS = GUIDE_LEFT.length * C.guideTypeMs;
+    GUIDE_RIGHT.split("").forEach((ch, i) => {
+      setTimeout(() => { if (!bootDone && guideRight) guideRight.textContent += ch; }, t + LEFT_MS + i * C.guideTypeMs);
+    });
+    const textDone = t + LEFT_MS + GUIDE_RIGHT.length * C.guideTypeMs;
+
+    // Icon builds in 3 clearly distinct beats, starting after a pause once text is done
+    const ICON_GAP   = 500;   // breath before the icon starts — lets the text settle visually
+    const ARC_MS     = 900;   // arc draws slowly and deliberately
+    const ARC_PAUSE  = 420;   // clear pause after arc — the circle sits alone for a moment
+    const DOT_MS     = 380;   // inner white dot springs in
+    const DOT_PAUSE  = 520;   // clear pause after dot — then the gold completes the logo
+    const GOLD_MS    = 420;   // gold dot pops with spring overshoot
+    const ICON_START = textDone + ICON_GAP;
+
+    // Reveal icon wrapper so it occupies its space (but circles are still opacity:0)
+    setTimeout(() => {
+      if (bootDone) return;
+      if (guideIcon) guideIcon.style.opacity = "1";
+    }, ICON_START);
+
+    // Beat 1: arc traces itself around the circle via CSS stroke-dashoffset transition
+    setTimeout(() => {
+      if (bootDone || !iconArc) return;
+      const ARC_LEN = 47.1;   // circumference of r=9 minus the gap (~60°)
+      const GAP     = 9.4;
+      // Set dasharray + start dashoffset via style so the CSS transition picks them up
+      iconArc.style.strokeDasharray = `${ARC_LEN} ${GAP}`;
+      iconArc.style.strokeDashoffset = String(ARC_LEN);  // fully hidden — stroke retracted
+      iconArc.style.opacity = "1";
+      // Force a reflow so the browser registers the hidden state BEFORE we set the transition
+      iconArc.getBoundingClientRect();
+      iconArc.style.transition = `stroke-dashoffset ${ARC_MS}ms cubic-bezier(0.4,0,0.2,1), opacity 80ms ease`;
+      iconArc.style.strokeDashoffset = "0";  // ← transition fires here, drawing the arc
+    }, ICON_START);
+
+    // Beat 2: inner white dot materialises with a spring bounce
+    setTimeout(() => {
+      if (bootDone || !iconDot) return;
+      iconDot.style.transition = `opacity ${DOT_MS}ms ease, transform ${DOT_MS}ms cubic-bezier(0.34,1.56,0.64,1)`;
+      iconDot.style.opacity = "1";
+      iconDot.style.transform = "scale(1)";
+    }, ICON_START + ARC_MS + ARC_PAUSE);
+
+    // Beat 3: gold dot pops into the gap — strong spring overshoot
+    setTimeout(() => {
+      if (bootDone || !iconGold) return;
+      iconGold.style.transition = `opacity ${GOLD_MS}ms ease, transform ${GOLD_MS}ms cubic-bezier(0.34,1.7,0.64,1)`;
+      iconGold.style.opacity = "1";
+      iconGold.style.transform = "scale(1)";
+    }, ICON_START + ARC_MS + ARC_PAUSE + DOT_MS + DOT_PAUSE);
+
+    const iconDone = ICON_START + ARC_MS + ARC_PAUSE + DOT_MS + DOT_PAUSE + GOLD_MS + 200;
+
+    // Cleanup timing anchor
+    const total = iconDone + 60;
     setTimeout(() => {
       if (bootDone) return;
       nodes.forEach(n => { if (n.el) { n.el.style.transition = ""; n.el.style.transform = ""; } });
@@ -1738,8 +1843,37 @@ const sections = JSON.stringify(site.sections);
       MODEL.edges.forEach(e => { if (e.el) { e.el.style.transition = ""; e.el.style.strokeDasharray = ""; e.el.style.strokeDashoffset = ""; e.el.style.opacity = e.baseOpacity; e.el.style.stroke = ""; e.el.style.strokeWidth = ""; } });
     }
     document.querySelectorAll(".nn-btn").forEach(b => { b.style.transition = ""; b.style.transform = ""; b.style.opacity = ""; });
-    const guide = document.querySelector(".nn-guide");
-    if (guide && !guide.textContent.trim()) setGuideText();
+    setGuideText();
+  }
+
+  function setGuideText() {
+    const left  = document.getElementById("nn-guide-left");
+    const right = document.getElementById("nn-guide-right");
+    const icon  = document.getElementById("nn-guide-icon");
+    const arc   = document.getElementById("nn-icon-arc");
+    const dot   = document.getElementById("nn-icon-dot");
+    const gold  = document.getElementById("nn-icon-gold");
+    if (isMobile) {
+      // Mobile: plain · separator, no icon
+      if (left)  left.textContent  = "tap a page for magic  ·  double tap to miss it";
+      if (right) right.textContent = "";
+      if (icon)  icon.style.opacity = "0";   // keep hidden — CSS also hides it
+      return;
+    }
+    // Desktop: populated spans + fully-revealed icon
+    const L = "click a page for magic  ";
+    const R = "  double-click to miss it";
+    if (left)  left.textContent  = L;
+    if (right) right.textContent = R;
+    if (icon)  icon.style.opacity = "1";
+    if (arc) {
+      arc.style.strokeDasharray = "47.1 9.4";
+      arc.style.strokeDashoffset = "0";
+      arc.style.transition = "none";
+      arc.style.opacity = "1";
+    }
+    if (dot) { dot.style.transition = "none"; dot.style.opacity = "1"; dot.style.transform = "scale(1)"; }
+    if (gold) { gold.style.transition = "none"; gold.style.opacity = "1"; gold.style.transform = "scale(1)"; }
   }
 
   // ── Pointer field interaction ──────────────────────────────────────────────
@@ -1777,15 +1911,6 @@ const sections = JSON.stringify(site.sections);
       if (p) { pointerX = p.x; pointerY = p.y; }
     });
     root.addEventListener("pointerleave", () => { pointerX = pointerY = null; });
-  }
-
-  // ── Guide line copy — differs by device (desktop = click/double-click; mobile =
-  // tap input → tap result). Set BEFORE boot so the typewriter types the right copy. ──
-  const GUIDE_DESKTOP = "click a page for magic  ·  double-click to miss it";
-  const GUIDE_MOBILE  = "tap a page for magic  ·  double tap to miss it";
-  function setGuideText() {
-    const guide = document.querySelector(".nn-guide");
-    if (guide) guide.textContent = isMobile ? GUIDE_MOBILE : GUIDE_DESKTOP;
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -2224,6 +2349,27 @@ const sections = JSON.stringify(site.sections);
     .nn-guide-hidden { transform: translateX(-50%) translateY(0); }
   }
 
+  /* Inline favicon icon — sits in the middle of the guide text, replacing the · */
+  .nn-guide-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* Optical centering on the text baseline — slight upward nudge */
+    vertical-align: middle;
+    position: relative;
+    top: -0.06em;
+    /* Horizontal spacing — mirrors the old  ·  padding */
+    margin: 0 0.45em;
+    opacity: 0;   /* boot starts hidden; JS reveals it during the icon animation */
+    transition: opacity 0.3s ease;
+  }
+  .nn-guide-svg {
+    /* Inherit the guide text color so arc + center dot match the text hue */
+    color: inherit;
+    display: block;
+    overflow: visible;
+  }
+
   /* ── Loss + argmax caption — top-right, stacked cleanly BELOW the socials ────── */
   .nn-caption {
     position: fixed;
@@ -2392,6 +2538,8 @@ const sections = JSON.stringify(site.sections);
       max-width: min(92vw, 30rem);
       line-height: 1.4;
     }
+    /* Icon is desktop-only — mobile uses the plain · text separator */
+    .nn-guide-icon { display: none; }
   }
 
   /* Narrow phones (≤26rem/~416px): trim the input labels just enough that all four fit
