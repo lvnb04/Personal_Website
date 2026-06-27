@@ -1,11 +1,11 @@
 {
-  "name": "Bharateesha LVN",
-  "short_name": "BLVN",
+  "name": "Bharateesha Lvn",
+  "short_name": "Bharateesha",
   "icons": [
-    { "src": "/favicon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/favicon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ],
-  "theme_color": "#0C0E13",
-  "background_color": "#0C0E13",
+  "theme_color": "#17171b",
+  "background_color": "#17171b",
   "display": "standalone"
 }
