@@ -62,15 +62,26 @@ export const ABOUT = {
     label: { professional: "experience", playful: "training history" },
     timeline: [
       {
-        period: "Jan 2026 — present",
+        period: "Jul 2026 — present",
         current: true,
+        title: "AI Engineer Intern",
+        org: "Sarvam AI",
+        description: {
+          professional:
+            "Working within the healthcare and business team to design, build, and deploy impactful generative AI products for real-world use cases.",
+          playful:
+            "Building high-impact products in the healthcare and business team to solve real-world problems with generative AI.",
+        },
+      },
+      {
+        period: "Jan — Jul 2026",
         title: "AI Intern",
         org: "LeadSquared",
         description: {
           professional:
-            "Building real-time voice AI agents on a cascaded STT-LLM-TTS architecture, aiming to acheive low latency workloads.",
+            "Developed a production-grade tool-calling framework with SSRF/DNS-rebinding protection. Optimized turn-taking latency in the STT–LLM–TTS pipeline using VAD tuning and token aggregation to lower p90 response times. Shipped end-to-end voice platform features across React and FastAPI, integrated multilingual pipelines supporting 12+ Indian languages, and built evaluation and testing frameworks.",
           playful:
-            "Making bots that actually listen — STT → LLM → TTS in real time, so sales reps can hand off the boring calls.",
+            "Wired up the machinery for real-time voice bots: designed a secure tool-calling framework, cut pipeline latency (STT–LLM–TTS) via VAD and token tuning, and enabled language switching across 12+ Indian languages. Also led security remediation, built agent evaluation suites, and handled full-stack features from React configuration dashboards to PostgreSQL schema migrations.",
         },
       },
       {
@@ -101,7 +112,7 @@ export const ABOUT = {
   // Section labels resample (voice); their bodies are facts and do NOT change.
   now: {
     label: { professional: "now", playful: "current epoch" },
-    body: "Building real-time voice AI agents.",
+    body: "AI Engineer Intern at Sarvam AI.",
   },
   education: {
     label: { professional: "education", playful: "pretraining" },
