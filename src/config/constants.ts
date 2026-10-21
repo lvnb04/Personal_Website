@@ -62,8 +62,19 @@ export const ABOUT = {
     label: { professional: "experience", playful: "training history" },
     timeline: [
       {
-        period: "Jul 2026 — present",
+        period: "Oct 2026 — present",
         current: true,
+        title: "AI Engineer",
+        org: "Sarvam AI",
+        description: {
+          professional:
+            "Joined full-time after the internship. Continuing in the healthcare and business team, designing, building, and deploying generative AI products for real-world use cases.",
+          playful:
+            "Converted from intern to full-time. Still in the healthcare and business team, shipping generative AI products that solve real-world problems.",
+        },
+      },
+      {
+        period: "Jul — Oct 2026",
         title: "AI Engineer Intern",
         org: "Sarvam AI",
         description: {
@@ -112,7 +123,7 @@ export const ABOUT = {
   // Section labels resample (voice); their bodies are facts and do NOT change.
   now: {
     label: { professional: "now", playful: "current epoch" },
-    body: "AI Engineer Intern at Sarvam AI.",
+    body: "AI Engineer at Sarvam AI.",
   },
   education: {
     label: { professional: "education", playful: "pretraining" },
