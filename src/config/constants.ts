@@ -68,9 +68,9 @@ export const ABOUT = {
         org: "Sarvam AI",
         description: {
           professional:
-            "Joined full-time after the internship. Continuing in the healthcare and business team, designing, building, and deploying generative AI products for real-world use cases.",
+            "Joined full-time after the internship. Continuing in the education and healthcare team, designing, building, and deploying AI products for real-world use cases.",
           playful:
-            "Converted from intern to full-time. Still in the healthcare and business team, shipping generative AI products that solve real-world problems.",
+            "Converted from intern to full-time. Still in the education and healthcare team, shipping AI products that solve real-world problems.",
         },
       },
       {
@@ -79,9 +79,9 @@ export const ABOUT = {
         org: "Sarvam AI",
         description: {
           professional:
-            "Working within the healthcare and business team to design, build, and deploy impactful generative AI products for real-world use cases.",
+            "Working within the education and healthcare team to design, build, and deploy impactful AI products for real-world use cases.",
           playful:
-            "Building high-impact products in the healthcare and business team to solve real-world problems with generative AI.",
+            "Building high-impact products in the education and healthcare team to solve real-world problems with AI.",
         },
       },
       {
