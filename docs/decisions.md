@@ -177,3 +177,11 @@ Tuned values: nodes `rgba(124,140,255,0.35)` radius `1.8`, edges max opacity `0.
 - Static output only; no backend.
 - Joke Budget (§9) enforced — subtlety via scarcity.
 - Build order: scaffold → inner pages + Tile → sample post → Toc → NeuralNet last.
+
+---
+
+## 9. Deployment (Vercel auto-deploy from `main`)
+
+- Commits that deployed: real file changes, author email `bharateeshalvn@Bharateeshas-MacBook-Air.local`.
+- Commits that did not: empty commits (`--allow-empty`) and commits authored with the GitHub noreply email.
+- If a push gets no Vercel ✓ on GitHub, check the Vercel GitHub App's repo access, then the commit's author email. Fallback: `npx vercel --prod`.
